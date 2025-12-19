@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Mic, Music, Sparkles, Waves, Share2, Activity } from "lucide-react";
+import { Mic, Music, Sparkles, Waves, Share2, Activity, Download } from "lucide-react";
 
 export default function App() {
   const [recording, setRecording] = useState(false);
@@ -14,6 +14,7 @@ export default function App() {
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const animationFrameRef = useRef(null);
+  const reportRef = useRef(null);
 
   // Voice range classification based on frequency
   const getVoiceRange = (avgFreq) => {
@@ -287,6 +288,54 @@ export default function App() {
     };
   }, []);
 
+  // Download report as image
+  const downloadReport = async () => {
+    if (!reportRef.current) return;
+
+    try {
+      // Use html2canvas library via CDN
+      const html2canvas = await loadHtml2Canvas();
+      
+      const canvas = await html2canvas(reportRef.current, {
+        backgroundColor: '#ffffff',
+        scale: 2, // Higher quality
+        logging: false,
+        useCORS: true
+      });
+
+      // Convert to blob and download
+      canvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `shower-head-mic-report-${Date.now()}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }, 'image/png');
+    } catch (error) {
+      console.error('Error downloading report:', error);
+      alert('Error downloading report. Please try again.');
+    }
+  };
+
+  // Load html2canvas dynamically
+  const loadHtml2Canvas = () => {
+    return new Promise((resolve, reject) => {
+      if (window.html2canvas) {
+        resolve(window.html2canvas);
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+      script.onload = () => resolve(window.html2canvas);
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  };
+
   return (
     <div className="min-h-screen bg-black text-white font-sans">
       {/* HERO */}
@@ -372,37 +421,69 @@ export default function App() {
 
           {analysis && (
             <>
-              <div className="mt-12 grid md:grid-cols-3 gap-8">
-                <div className="p-6 rounded-2xl shadow-xl bg-gradient-to-br from-purple-50 to-blue-50">
-                  <Sparkles className="mx-auto text-purple-600" size={40} />
-                  <h3 className="mt-4 text-xl font-semibold">Voice Range</h3>
-                  <p className="mt-2 text-3xl font-bold text-purple-600">{analysis.range}</p>
-                  <p className="mt-2 text-sm text-gray-600">
-                    {analysis.minFreq}Hz - {analysis.maxFreq}Hz
-                  </p>
-                  <p className="text-sm text-gray-500">
-                    Average: {analysis.avgFrequency}Hz
-                  </p>
+              {/* Report Card - This will be captured as image */}
+              <div ref={reportRef} className="mt-12 p-8 bg-white rounded-3xl">
+                {/* Header with logo/title */}
+                <div className="mb-8">
+                  <h1 className="text-5xl font-extrabold tracking-tight bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                    SHOWER HEAD MIC
+                  </h1>
+                  <p className="text-gray-500 mt-2">Voice Analysis Report</p>
                 </div>
-                <div className="p-6 rounded-2xl shadow-xl bg-gradient-to-br from-green-50 to-emerald-50">
-                  <Music className="mx-auto text-green-600" size={40} />
-                  <h3 className="mt-4 text-xl font-semibold">Song Matches</h3>
-                  <ul className="mt-2 text-sm space-y-1">
-                    {analysis.songs.map((s, i) => (
-                      <li key={i} className="text-gray-700">{s}</li>
-                    ))}
-                  </ul>
+
+                {/* Main Analysis Grid */}
+                <div className="grid md:grid-cols-3 gap-8">
+                  <div className="p-6 rounded-2xl shadow-xl bg-gradient-to-br from-purple-50 to-blue-50 border-2 border-purple-200">
+                    <Sparkles className="mx-auto text-purple-600" size={40} />
+                    <h3 className="mt-4 text-xl font-semibold">Voice Range</h3>
+                    <p className="mt-2 text-3xl font-bold text-purple-600">{analysis.range}</p>
+                    <p className="mt-2 text-sm text-gray-600">
+                      {analysis.minFreq}Hz - {analysis.maxFreq}Hz
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      Average: {analysis.avgFrequency}Hz
+                    </p>
+                  </div>
+                  <div className="p-6 rounded-2xl shadow-xl bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200">
+                    <Music className="mx-auto text-green-600" size={40} />
+                    <h3 className="mt-4 text-xl font-semibold">Song Matches</h3>
+                    <ul className="mt-2 text-sm space-y-1">
+                      {analysis.songs.map((s, i) => (
+                        <li key={i} className="text-gray-700">{s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="p-6 rounded-2xl shadow-xl bg-gradient-to-br from-orange-50 to-red-50 border-2 border-orange-200">
+                    <Waves className="mx-auto text-orange-600" size={40} />
+                    <h3 className="mt-4 text-xl font-semibold">Artist Similarity</h3>
+                    <p className="mt-2 text-sm text-gray-700">{analysis.artists.join(", ")}</p>
+                  </div>
                 </div>
-                <div className="p-6 rounded-2xl shadow-xl bg-gradient-to-br from-orange-50 to-red-50">
-                  <Waves className="mx-auto text-orange-600" size={40} />
-                  <h3 className="mt-4 text-xl font-semibold">Artist Similarity</h3>
-                  <p className="mt-2 text-sm text-gray-700">{analysis.artists.join(", ")}</p>
+
+                {/* Footer */}
+                <div className="mt-8 pt-6 border-t border-gray-200">
+                  <p className="text-sm text-gray-400">
+                    Generated on {new Date().toLocaleDateString('en-US', { 
+                      year: 'numeric', 
+                      month: 'long', 
+                      day: 'numeric' 
+                    })}
+                  </p>
                 </div>
               </div>
 
-              <button className="mt-10 inline-flex items-center gap-2 border-2 border-black px-6 py-3 rounded-xl hover:bg-black hover:text-white transition">
-                <Share2 /> Share Report Card
-              </button>
+              {/* Action Buttons */}
+              <div className="mt-10 flex gap-4 justify-center flex-wrap">
+                <button 
+                  onClick={downloadReport}
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white px-6 py-3 rounded-xl hover:from-purple-700 hover:to-blue-700 transition shadow-lg"
+                >
+                  <Download size={20} /> Download Report
+                </button>
+                <button className="inline-flex items-center gap-2 border-2 border-black px-6 py-3 rounded-xl hover:bg-black hover:text-white transition">
+                  <Share2 /> Share Report Card
+                </button>
+              </div>
             </>
           )}
         </div>
