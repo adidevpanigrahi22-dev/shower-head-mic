@@ -20,6 +20,22 @@ export default function App() {
     mediaRecorderRef.current.ondataavailable = (e) => {
       audioChunksRef.current.push(e.data);
     };
+  const uploadAndAnalyze = async (blob) => {
+  const formData = new FormData();
+  formData.append("file", blob, "voice.wav");
+
+  const res = await fetch(
+    "https://shower-head-mic-backend.onrender.com/api/analyze",
+    {
+      method: "POST",
+      body: formData,
+    }
+  );
+
+  const data = await res.json();
+  setAnalysis(data);
+};
+
 
     mediaRecorderRef.current.onstop = () => {
       const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
