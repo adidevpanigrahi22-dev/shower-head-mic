@@ -37,12 +37,12 @@ export default function App() {
 };
 
 
-    mediaRecorderRef.current.onstop = () => {
-      const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-      setAudioURL(URL.createObjectURL(blob));
-      audioChunksRef.current = [];
-      runFakeAnalysis();
-    };
+  mediaRecorderRef.current.onstop = async () => {
+    const blob = new Blob(audioChunksRef.current, { type: "audio/wav" });
+    setAudioURL(URL.createObjectURL(blob));
+    audioChunksRef.current = [];
+    await uploadAndAnalyze(blob);
+  };   
 
     mediaRecorderRef.current.start();
     setRecording(true);
