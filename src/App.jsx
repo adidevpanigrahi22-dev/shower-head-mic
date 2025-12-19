@@ -490,7 +490,7 @@ export default function App() {
       </section>
 
       <footer className="py-10 text-center text-gray-500 bg-black">
-        © 2025 Shower Head Mic
+        © 2025 NoteHeads         
       </footer>
     </div>
   );
