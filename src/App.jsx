@@ -15,17 +15,16 @@ export default function App() {
   const analyserRef = useRef(null);
   const animationFrameRef = useRef(null);
   const reportRef = useRef(null);
-
-  // Voice range classification based on frequency
+  
+    // Voice range classification based on frequency (updated thresholds)
   const getVoiceRange = (avgFreq) => {
-    if (avgFreq < 110) return "Bass";
-    if (avgFreq < 165) return "Baritone";
-    if (avgFreq < 262) return "Tenor";
-    if (avgFreq < 330) return "Alto";
-    if (avgFreq < 523) return "Mezzo-Soprano";
-    return "Soprano";
-  };
-
+    if (avgFreq < 130) return "Bass";        // E2-E4: ~82-330Hz
+    if (avgFreq < 180) return "Baritone";    // A2-A4: ~110-440Hz
+    if (avgFreq < 280) return "Tenor";       // C3-C5: ~130-520Hz
+    if (avgFreq < 350) return "Alto";        // F3-F5: ~175-700Hz
+    if (avgFreq < 450) return "Mezzo-Soprano"; // A3-A5: ~220-880Hz
+    return "Soprano";                        // C4-C6: ~260-1046Hz
+  }
   // Analyze recorded audio blob
   const analyzeAudioBlob = async (blob) => {
     setAnalyzing(true);
