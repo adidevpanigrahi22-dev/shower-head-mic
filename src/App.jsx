@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Mic, Music, Sparkles, Waves, Share2, Activity, Download } from "lucide-react";
+import html2canvas from "html2canvas"; // Standard import
 
 export default function App() {
   const [recording, setRecording] = useState(false);
@@ -22,7 +23,6 @@ export default function App() {
   const MIN_VOCAL_FREQ = 60; 
   const MAX_VOCAL_FREQ = 1000;
 
-  // Helper: Convert Frequency to Musical Note
   const getNoteFromFreq = (freq) => {
     if (!freq || freq <= 0) return "-";
     const NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -84,7 +84,8 @@ export default function App() {
     setAnalyzing(true);
     try {
       const arrayBuffer = await blob.arrayBuffer();
-      const tempCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      const tempCtx = new AudioContextClass();
       let audioBuffer = await tempCtx.decodeAudioData(arrayBuffer);
       audioBuffer = await applyVocalFilters(audioBuffer);
       
@@ -134,6 +135,7 @@ export default function App() {
     if (!analyserRef.current) return;
     const timeData = new Float32Array(analyserRef.current.fftSize);
     const update = () => {
+      if (!analyserRef.current) return;
       analyserRef.current.getFloatTimeDomainData(timeData);
       const pitch = detectPitch(timeData, audioContextRef.current.sampleRate);
       if (pitch > MIN_VOCAL_FREQ && pitch < MAX_VOCAL_FREQ) {
@@ -152,7 +154,7 @@ export default function App() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-      audioContextRef.current = new AudioContext();
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
       const source = audioContextRef.current.createMediaStreamSource(stream);
       analyserRef.current = audioContextRef.current.createAnalyser();
       analyserRef.current.fftSize = 2048;
@@ -164,21 +166,27 @@ export default function App() {
       mediaRecorderRef.current.onstop = () => analyzeAudioBlob(new Blob(audioChunksRef.current, { type: "audio/wav" }));
       mediaRecorderRef.current.start();
       setRecording(true);
-    } catch (err) { alert("Mic required"); }
+    } catch (err) { alert("Mic required or not supported in this browser."); }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current) {
+    if (mediaRecorderRef.current && recording) {
       mediaRecorderRef.current.stop();
       setRecording(false);
-      streamRef.current.getTracks().forEach(t => t.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+      }
       cancelAnimationFrame(animationFrameRef.current);
     }
   };
 
   const downloadReport = async () => {
-    const html2canvas = (await import('html2canvas')).default;
-    const canvas = await html2canvas(reportRef.current, { backgroundColor: '#ffffff', scale: 2 });
+    if (!reportRef.current) return;
+    const canvas = await html2canvas(reportRef.current, { 
+      backgroundColor: '#ffffff', 
+      scale: 2,
+      useCORS: true 
+    });
     const link = document.createElement('a');
     link.href = canvas.toDataURL('image/png');
     link.download = `shower-mic-report.png`;
@@ -187,12 +195,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-black text-white font-sans">
+      {/* Header Section */}
       <section className="h-screen flex flex-col justify-center items-center text-center px-6">
         <h1 className="text-6xl md:text-7xl font-extrabold tracking-tight animate-pulse">SHOWER HEAD MIC</h1>
         <p className="mt-6 max-w-xl text-gray-300 text-lg">Discover your voice range, song matches, and artist similarities — instantly.</p>
         <p className="mt-2 text-sm text-gray-500">✨ Pro Accuracy & Note Detection Enabled</p>
       </section>
 
+      {/* Instructions */}
       <section className="py-24 px-6 bg-white text-black">
         <div className="max-w-4xl mx-auto">
           <h2 className="text-4xl font-bold text-center">How to use</h2>
@@ -204,6 +214,7 @@ export default function App() {
         </div>
       </section>
 
+      {/* Recording UI */}
       <section className="py-24 px-6 bg-black">
         <div className="max-w-5xl mx-auto text-center">
           <h2 className="text-4xl font-bold">Record your voice</h2>
@@ -226,7 +237,10 @@ export default function App() {
             </div>
           )}
           <div className="mt-8">
-            <button onClick={recording ? stopRecording : startRecording} className={`inline-flex items-center gap-2 px-8 py-4 rounded-2xl text-lg font-semibold transition ${recording ? "bg-red-500 text-white" : "bg-white text-black hover:scale-105"}`}>
+            <button 
+              onClick={recording ? stopRecording : startRecording} 
+              className={`inline-flex items-center gap-2 px-8 py-4 rounded-2xl text-lg font-semibold transition ${recording ? "bg-red-500 text-white" : "bg-white text-black hover:scale-105"}`}
+            >
               <Mic /> {recording ? "Stop Recording" : "Start Recording"}
             </button>
           </div>
@@ -234,6 +248,7 @@ export default function App() {
         </div>
       </section>
 
+      {/* Report Section */}
       <section className="py-24 px-6 bg-white text-black">
         <div className="max-w-4xl mx-auto text-center">
           <h2 className="text-4xl font-bold">Your Voice Report</h2>
@@ -245,7 +260,7 @@ export default function App() {
                   <h1 className="text-5xl font-extrabold tracking-tight bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">SHOWER HEAD MIC</h1>
                   <p className="text-gray-500 mt-2">Professional Voice Analysis</p>
                 </div>
-                <div className="grid md:grid-cols-3 gap-8">
+                <div className="grid md:grid-cols-3 gap-8 text-center">
                   <div className="p-6 rounded-2xl bg-purple-50 border-2 border-purple-100">
                     <Sparkles className="mx-auto text-purple-600" size={40} />
                     <h3 className="mt-4 text-xl font-semibold">Voice Range</h3>
@@ -268,8 +283,12 @@ export default function App() {
                 </div>
               </div>
               <div className="mt-10 flex gap-4 justify-center">
-                <button onClick={downloadReport} className="inline-flex items-center gap-2 bg-black text-white px-6 py-3 rounded-xl hover:bg-gray-800 transition shadow-lg"><Download size={20} /> Save Report</button>
-                <button className="inline-flex items-center gap-2 border-2 border-black px-6 py-3 rounded-xl hover:bg-black hover:text-white transition"><Share2 /> Share</button>
+                <button onClick={downloadReport} className="inline-flex items-center gap-2 bg-black text-white px-6 py-3 rounded-xl hover:bg-gray-800 transition shadow-lg">
+                  <Download size={20} /> Save Report
+                </button>
+                <button className="inline-flex items-center gap-2 border-2 border-black px-6 py-3 rounded-xl hover:bg-black hover:text-white transition">
+                  <Share2 size={20} /> Share
+                </button>
               </div>
             </>
           )}
