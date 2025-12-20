@@ -15,8 +15,10 @@ export default function App() {
   const analyserRef = useRef(null);
   const animationFrameRef = useRef(null);
   const reportRef = useRef(null);
-  
-    // Voice range classification based on frequency (updated thresholds)
+  const noiseGateRef = useRef(null);
+  const streamRef = useRef(null);
+
+  // Voice range classification based on frequency (updated thresholds)
   const getVoiceRange = (avgFreq) => {
     if (avgFreq < 130) return "Bass";        // E2-E4: ~82-330Hz
     if (avgFreq < 180) return "Baritone";    // A2-A4: ~110-440Hz
@@ -24,88 +26,267 @@ export default function App() {
     if (avgFreq < 350) return "Alto";        // F3-F5: ~175-700Hz
     if (avgFreq < 450) return "Mezzo-Soprano"; // A3-A5: ~220-880Hz
     return "Soprano";                        // C4-C6: ~260-1046Hz
-  }
-  // Analyze recorded audio blob
+  };
+
+  // Apply spectral noise gate to reduce background noise
+  const applySpectralNoiseGate = (audioBuffer) => {
+    const channelData = audioBuffer.getChannelData(0);
+    const sampleRate = audioBuffer.sampleRate;
+    const fftSize = 2048;
+    const hopSize = fftSize / 2;
+    
+    // Estimate noise profile from first 0.5 seconds (assuming initial silence/noise)
+    const noiseProfileLength = Math.min(Math.floor(sampleRate * 0.5), channelData.length);
+    const noiseProfile = estimateNoiseProfile(channelData.slice(0, noiseProfileLength), fftSize);
+    
+    // Apply spectral subtraction
+    const cleanedData = new Float32Array(channelData.length);
+    
+    for (let i = 0; i < channelData.length - fftSize; i += hopSize) {
+      const frame = channelData.slice(i, i + fftSize);
+      const cleanedFrame = spectralSubtraction(frame, noiseProfile, fftSize);
+      
+      // Overlap-add
+      for (let j = 0; j < cleanedFrame.length && i + j < cleanedData.length; j++) {
+        cleanedData[i + j] += cleanedFrame[j] * hannWindow(j, fftSize);
+      }
+    }
+    
+    // Normalize
+    const maxVal = Math.max(...cleanedData.map(Math.abs));
+    if (maxVal > 0) {
+      for (let i = 0; i < cleanedData.length; i++) {
+        cleanedData[i] /= maxVal;
+      }
+    }
+    
+    // Create new audio buffer with cleaned data
+    const cleanBuffer = audioContextRef.current.createBuffer(
+      1,
+      cleanedData.length,
+      sampleRate
+    );
+    cleanBuffer.copyToChannel(cleanedData, 0);
+    
+    return cleanBuffer;
+  };
+
+  // Estimate noise profile from audio segment
+  const estimateNoiseProfile = (data, fftSize) => {
+    const numFrames = Math.floor(data.length / fftSize);
+    const profile = new Float32Array(fftSize / 2);
+    
+    for (let frame = 0; frame < numFrames; frame++) {
+      const start = frame * fftSize;
+      const frameData = data.slice(start, start + fftSize);
+      const spectrum = computeFFT(frameData);
+      
+      for (let i = 0; i < profile.length; i++) {
+        profile[i] += spectrum[i] / numFrames;
+      }
+    }
+    
+    return profile;
+  };
+
+  // Spectral subtraction for noise reduction
+  const spectralSubtraction = (frame, noiseProfile, fftSize) => {
+    const spectrum = computeFFT(frame);
+    const cleanSpectrum = new Float32Array(spectrum.length);
+    const alpha = 2.0; // Over-subtraction factor
+    const beta = 0.02; // Spectral floor
+    
+    for (let i = 0; i < spectrum.length; i++) {
+      const subtracted = spectrum[i] - alpha * noiseProfile[i];
+      cleanSpectrum[i] = Math.max(subtracted, beta * spectrum[i]);
+    }
+    
+    return inverseFFT(cleanSpectrum, frame.length);
+  };
+
+  // Simple FFT magnitude computation
+  const computeFFT = (data) => {
+    const n = data.length;
+    const magnitude = new Float32Array(n / 2);
+    
+    for (let k = 0; k < n / 2; k++) {
+      let real = 0;
+      let imag = 0;
+      
+      for (let i = 0; i < n; i++) {
+        const angle = (-2 * Math.PI * k * i) / n;
+        real += data[i] * Math.cos(angle);
+        imag += data[i] * Math.sin(angle);
+      }
+      
+      magnitude[k] = Math.sqrt(real * real + imag * imag);
+    }
+    
+    return magnitude;
+  };
+
+  // Simple inverse FFT (using magnitude only - phase reconstruction)
+  const inverseFFT = (magnitude, length) => {
+    const output = new Float32Array(length);
+    const n = length;
+    
+    for (let i = 0; i < n; i++) {
+      let sum = 0;
+      for (let k = 0; k < magnitude.length; k++) {
+        const angle = (2 * Math.PI * k * i) / n;
+        sum += magnitude[k] * Math.cos(angle);
+      }
+      output[i] = sum / n;
+    }
+    
+    return output;
+  };
+
+  // Hann window function
+  const hannWindow = (n, N) => {
+    return 0.5 * (1 - Math.cos((2 * Math.PI * n) / (N - 1)));
+  };
+
+  // Apply adaptive high-pass filter to remove low-frequency noise
+  const applyHighPassFilter = (buffer, cutoffFreq = 80) => {
+    const channelData = buffer.getChannelData(0);
+    const sampleRate = buffer.sampleRate;
+    const rc = 1.0 / (2 * Math.PI * cutoffFreq);
+    const dt = 1.0 / sampleRate;
+    const alpha = rc / (rc + dt);
+    
+    const filtered = new Float32Array(channelData.length);
+    filtered[0] = channelData[0];
+    
+    for (let i = 1; i < channelData.length; i++) {
+      filtered[i] = alpha * (filtered[i - 1] + channelData[i] - channelData[i - 1]);
+    }
+    
+    const filteredBuffer = audioContextRef.current.createBuffer(
+      1,
+      filtered.length,
+      sampleRate
+    );
+    filteredBuffer.copyToChannel(filtered, 0);
+    
+    return filteredBuffer;
+  };
+
+  // Apply median filter to remove impulse noise
+  const applyMedianFilter = (data, windowSize = 5) => {
+    const filtered = new Float32Array(data.length);
+    const halfWindow = Math.floor(windowSize / 2);
+    
+    for (let i = 0; i < data.length; i++) {
+      const window = [];
+      for (let j = -halfWindow; j <= halfWindow; j++) {
+        const idx = Math.max(0, Math.min(data.length - 1, i + j));
+        window.push(data[idx]);
+      }
+      window.sort((a, b) => a - b);
+      filtered[i] = window[Math.floor(window.length / 2)];
+    }
+    
+    return filtered;
+  };
+
+  // Analyze recorded audio blob with noise reduction
   const analyzeAudioBlob = async (blob) => {
     setAnalyzing(true);
     
     try {
       const arrayBuffer = await blob.arrayBuffer();
       const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      audioContextRef.current = audioContext;
+      let audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
       
-      // Get audio data
+      // Apply noise reduction pipeline
+      console.log("Applying noise reduction...");
+      audioBuffer = applyHighPassFilter(audioBuffer, 80); // Remove low-freq rumble
+      audioBuffer = applySpectralNoiseGate(audioBuffer);  // Spectral noise reduction
+      
+      // Get cleaned audio data
       const channelData = audioBuffer.getChannelData(0);
       
-      // Perform FFT analysis
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 4096;
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
+      // Apply median filter to remove impulse noise
+      const medianFiltered = applyMedianFilter(channelData, 5);
       
-      // Create offline context for analysis
-      const offlineContext = new OfflineAudioContext(
-        1,
-        audioBuffer.length,
-        audioBuffer.sampleRate
-      );
-      const source = offlineContext.createBufferSource();
-      source.buffer = audioBuffer;
-      const offlineAnalyser = offlineContext.createAnalyser();
-      offlineAnalyser.fftSize = 4096;
-      source.connect(offlineAnalyser);
-      offlineAnalyser.connect(offlineContext.destination);
-      source.start(0);
-      
-      // Analyze frequency content
-      const freqData = new Uint8Array(offlineAnalyser.frequencyBinCount);
-      const frequencies = [];
       const sampleRate = audioBuffer.sampleRate;
       
-      // Sample frequencies throughout the audio
-      const step = Math.floor(audioBuffer.length / 20);
-      for (let i = 0; i < channelData.length; i += step) {
-        const slice = channelData.slice(i, i + 2048);
-        const freq = detectPitch(slice, sampleRate);
-        if (freq > 50 && freq < 2000) {
-          frequencies.push(freq);
+      // Enhanced pitch detection with multiple samples
+      const frequencies = [];
+      const chunkSize = 4096; // Larger window for better low frequency detection
+      const hopSize = Math.floor(sampleRate * 0.05); // 50ms hop
+      
+      // Process audio in overlapping windows
+      for (let i = 0; i < medianFiltered.length - chunkSize; i += hopSize) {
+        const slice = medianFiltered.slice(i, i + chunkSize);
+        
+        // Calculate RMS to filter out silence
+        const rms = Math.sqrt(slice.reduce((sum, val) => sum + val * val, 0) / slice.length);
+        
+        // Only analyze chunks with sufficient energy
+        if (rms > 0.015) { // Lower threshold after noise reduction
+          const freq = detectPitchYIN(slice, sampleRate);
+          
+          // Stricter filtering for valid frequencies
+          if (freq > 60 && freq < 1000) {
+            frequencies.push(freq);
+          }
         }
       }
       
-      // Calculate average frequency
-      const avgFreq = frequencies.length > 0 
-        ? frequencies.reduce((a, b) => a + b, 0) / frequencies.length 
-        : 200;
+      // Remove outliers using statistical filtering
+      if (frequencies.length > 0) {
+        frequencies.sort((a, b) => a - b);
+        
+        // Remove top and bottom 15% as outliers
+        const trimAmount = Math.floor(frequencies.length * 0.15);
+        const trimmedFreqs = frequencies.slice(trimAmount, frequencies.length - trimAmount);
+        
+        // Calculate weighted average
+        const avgFreq = trimmedFreqs.length > 0
+          ? trimmedFreqs.reduce((a, b) => a + b, 0) / trimmedFreqs.length
+          : 200;
       
-      const range = getVoiceRange(avgFreq);
-      
-      // Song recommendations based on voice range
-      const songDatabase = {
-        "Bass": ["Ring of Fire – Johnny Cash", "Ain't No Sunshine – Bill Withers"],
-        "Baritone": ["Someone Like You – Adele", "Thinking Out Loud – Ed Sheeran"],
-        "Tenor": ["Perfect – Ed Sheeran", "Raabta – Arijit Singh", "Shape of You – Ed Sheeran"],
-        "Alto": ["Halo – Beyoncé", "Someone You Loved – Lewis Capaldi"],
-        "Mezzo-Soprano": ["Rolling in the Deep – Adele", "Skyscraper – Demi Lovato"],
-        "Soprano": ["I Will Always Love You – Whitney Houston", "Chandelier – Sia"]
-      };
-      
-      const artistDatabase = {
-        "Bass": ["Johnny Cash", "Barry White", "Leonard Cohen"],
-        "Baritone": ["Ed Sheeran", "Frank Sinatra", "John Legend"],
-        "Tenor": ["Arijit Singh", "Shawn Mendes", "Atif Aslam", "Bruno Mars"],
-        "Alto": ["Adele", "Amy Winehouse", "Norah Jones"],
-        "Mezzo-Soprano": ["Lady Gaga", "Ariana Grande", "Demi Lovato"],
-        "Soprano": ["Whitney Houston", "Mariah Carey", "Sia"]
-      };
-      
-      setAnalysis({
-        range,
-        avgFrequency: Math.round(avgFreq),
-        minFreq: Math.round(Math.min(...frequencies)),
-        maxFreq: Math.round(Math.max(...frequencies)),
-        songs: songDatabase[range] || ["Perfect – Ed Sheeran"],
-        artists: artistDatabase[range] || ["Arijit Singh", "Shawn Mendes"],
-      });
+        const range = getVoiceRange(avgFreq);
+        
+        // Calculate statistics
+        const minFreq = Math.min(...trimmedFreqs);
+        const maxFreq = Math.max(...trimmedFreqs);
+        
+        console.log(`Detected: ${frequencies.length} samples, Avg: ${avgFreq.toFixed(1)}Hz, Range: ${range}`);
+        
+        // Song recommendations based on voice range
+        const songDatabase = {
+          "Bass": ["Ring of Fire – Johnny Cash", "Ain't No Sunshine – Bill Withers", "Stand By Me – Ben E. King"],
+          "Baritone": ["Someone Like You – Adele", "Thinking Out Loud – Ed Sheeran", "Riptide – Vance Joy"],
+          "Tenor": ["Perfect – Ed Sheeran", "Raabta – Arijit Singh", "Shape of You – Ed Sheeran"],
+          "Alto": ["Halo – Beyoncé", "Someone You Loved – Lewis Capaldi", "Stay With Me – Sam Smith"],
+          "Mezzo-Soprano": ["Rolling in the Deep – Adele", "Skyscraper – Demi Lovato", "Girl on Fire – Alicia Keys"],
+          "Soprano": ["I Will Always Love You – Whitney Houston", "Chandelier – Sia", "Vision of Love – Mariah Carey"]
+        };
+        
+        const artistDatabase = {
+          "Bass": ["Johnny Cash", "Barry White", "Leonard Cohen", "Josh Turner"],
+          "Baritone": ["Ed Sheeran", "Frank Sinatra", "John Legend", "Michael Bublé"],
+          "Tenor": ["Arijit Singh", "Shawn Mendes", "Atif Aslam", "Bruno Mars", "Freddie Mercury"],
+          "Alto": ["Adele", "Amy Winehouse", "Norah Jones", "Tracy Chapman"],
+          "Mezzo-Soprano": ["Lady Gaga", "Ariana Grande", "Demi Lovato", "Christina Aguilera"],
+          "Soprano": ["Whitney Houston", "Mariah Carey", "Sia", "Celine Dion"]
+        };
+        
+        setAnalysis({
+          range,
+          avgFrequency: Math.round(avgFreq),
+          minFreq: Math.round(minFreq),
+          maxFreq: Math.round(maxFreq),
+          songs: songDatabase[range] || ["Perfect – Ed Sheeran"],
+          artists: artistDatabase[range] || ["Arijit Singh", "Shawn Mendes"],
+        });
+      } else {
+        throw new Error("No valid frequencies detected");
+      }
       
       audioContext.close();
     } catch (error) {
@@ -123,57 +304,71 @@ export default function App() {
     setAnalyzing(false);
   };
 
-  // Pitch detection using autocorrelation
-  const detectPitch = (buffer, sampleRate) => {
+  // Enhanced YIN pitch detection algorithm (better for low frequencies)
+  const detectPitchYIN = (buffer, sampleRate) => {
     const SIZE = buffer.length;
+    const threshold = 0.15;
+    
+    // Calculate RMS for silence detection
     const rms = Math.sqrt(buffer.reduce((sum, val) => sum + val * val, 0) / SIZE);
+    if (rms < 0.015) return -1;
     
-    if (rms < 0.01) return -1;
+    // Calculate difference function
+    const yinBuffer = new Float32Array(SIZE / 2);
+    yinBuffer[0] = 1;
     
-    let r1 = 0, r2 = SIZE - 1;
-    const threshold = 0.2;
+    let runningSum = 0;
+    for (let tau = 1; tau < SIZE / 2; tau++) {
+      yinBuffer[tau] = 0;
+      for (let i = 0; i < SIZE / 2; i++) {
+        const delta = buffer[i] - buffer[i + tau];
+        yinBuffer[tau] += delta * delta;
+      }
+      
+      // Cumulative mean normalized difference
+      runningSum += yinBuffer[tau];
+      if (runningSum === 0) {
+        yinBuffer[tau] = 1;
+      } else {
+        yinBuffer[tau] *= tau / runningSum;
+      }
+    }
     
-    for (let i = 0; i < SIZE / 2; i++) {
-      if (Math.abs(buffer[i]) < threshold) {
-        r1 = i;
+    // Find the first tau below threshold
+    let tau = -1;
+    for (let i = 2; i < SIZE / 2; i++) {
+      if (yinBuffer[i] < threshold) {
+        // Parabolic interpolation for better accuracy
+        while (i + 1 < SIZE / 2 && yinBuffer[i + 1] < yinBuffer[i]) {
+          i++;
+        }
+        tau = i;
         break;
       }
     }
     
-    for (let i = 1; i < SIZE / 2; i++) {
-      if (Math.abs(buffer[SIZE - i]) < threshold) {
-        r2 = SIZE - i;
-        break;
+    // If no period found, find global minimum
+    if (tau === -1) {
+      let minVal = 1;
+      for (let i = 2; i < SIZE / 2; i++) {
+        if (yinBuffer[i] < minVal) {
+          minVal = yinBuffer[i];
+          tau = i;
+        }
       }
+      if (minVal > 0.5) return -1; // Too uncertain
     }
     
-    const trimmedBuffer = buffer.slice(r1, r2);
-    const correlations = new Array(trimmedBuffer.length).fill(0);
-    
-    for (let i = 0; i < trimmedBuffer.length; i++) {
-      for (let j = 0; j < trimmedBuffer.length - i; j++) {
-        correlations[i] += trimmedBuffer[j] * trimmedBuffer[j + i];
-      }
+    // Parabolic interpolation for sub-sample accuracy
+    let betterTau = tau;
+    if (tau > 0 && tau < SIZE / 2 - 1) {
+      const s0 = yinBuffer[tau - 1];
+      const s1 = yinBuffer[tau];
+      const s2 = yinBuffer[tau + 1];
+      betterTau = tau + (s2 - s0) / (2 * (2 * s1 - s2 - s0));
     }
     
-    let d = 0;
-    while (correlations[d] > correlations[d + 1]) d++;
-    
-    let maxCorr = -1;
-    let maxCorrIndex = -1;
-    
-    for (let i = d; i < trimmedBuffer.length; i++) {
-      if (correlations[i] > maxCorr) {
-        maxCorr = correlations[i];
-        maxCorrIndex = i;
-      }
-    }
-    
-    const T0 = maxCorrIndex;
-    
-    if (T0 === 0) return -1;
-    
-    return sampleRate / T0;
+    return sampleRate / betterTau;
   };
 
   // Real-time frequency monitoring
@@ -201,10 +396,10 @@ export default function App() {
       const nyquist = audioContextRef.current.sampleRate / 2;
       const frequency = (maxIndex * nyquist) / bufferLength;
       
-      // Detect pitch from time domain
-      const pitch = detectPitch(timeDataArray, audioContextRef.current.sampleRate);
+      // Detect pitch from time domain using YIN
+      const pitch = detectPitchYIN(timeDataArray, audioContextRef.current.sampleRate);
       
-      if (pitch > 50 && pitch < 2000) {
+      if (pitch > 60 && pitch < 1000) {
         setLiveFrequency(Math.round(pitch));
       }
 
@@ -221,15 +416,38 @@ export default function App() {
 
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 48000
+        } 
+      });
+      
+      streamRef.current = stream;
       
       // Setup audio context for real-time analysis
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 2048;
       
       const source = audioContextRef.current.createMediaStreamSource(stream);
-      source.connect(analyserRef.current);
+      
+      // Create noise gate
+      noiseGateRef.current = audioContextRef.current.createDynamicsCompressor();
+      noiseGateRef.current.threshold.value = -50;
+      noiseGateRef.current.knee.value = 10;
+      noiseGateRef.current.ratio.value = 12;
+      noiseGateRef.current.attack.value = 0.003;
+      noiseGateRef.current.release.value = 0.25;
+      
+      // Setup analyser
+      analyserRef.current = audioContextRef.current.createAnalyser();
+      analyserRef.current.fftSize = 4096; // Larger for better low freq resolution
+      analyserRef.current.smoothingTimeConstant = 0.8;
+      
+      // Connect: source -> noise gate -> analyser
+      source.connect(noiseGateRef.current);
+      noiseGateRef.current.connect(analyserRef.current);
       
       // Start monitoring
       monitorFrequency();
@@ -255,8 +473,10 @@ export default function App() {
         await analyzeAudioBlob(blob);
         
         // Cleanup
-        stream.getTracks().forEach(track => track.stop());
-        if (audioContextRef.current) {
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+        }
+        if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
           audioContextRef.current.close();
         }
       };
@@ -281,7 +501,10 @@ export default function App() {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
       }
-      if (audioContextRef.current) {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
         audioContextRef.current.close();
       }
     };
@@ -297,7 +520,7 @@ export default function App() {
       
       const canvas = await html2canvas(reportRef.current, {
         backgroundColor: '#ffffff',
-        scale: 2, // Higher quality
+        scale: 2,
         logging: false,
         useCORS: true
       });
@@ -345,6 +568,9 @@ export default function App() {
         <p className="mt-6 max-w-xl text-gray-300 text-lg">
           Discover your voice range, song matches, and artist similarities — instantly.
         </p>
+        <p className="mt-2 text-sm text-gray-500">
+          ✨ Now with advanced noise cancellation
+        </p>
       </section>
 
       {/* HOW TO USE */}
@@ -357,6 +583,16 @@ export default function App() {
             <li><b>3.</b> Click <b>Stop Recording</b>.</li>
             <li><b>4.</b> View your voice range, song suggestions, and artist matches.</li>
           </ol>
+          <div className="mt-8 p-6 bg-blue-50 rounded-xl border border-blue-200">
+            <h3 className="font-bold text-lg">🎯 Tips for Best Results:</h3>
+            <ul className="mt-3 space-y-2 text-sm">
+              <li>• Record in a quiet environment</li>
+              <li>• Sing at your natural, comfortable pitch</li>
+              <li>• Hold sustained notes for 2-3 seconds</li>
+              <li>• For Bass/Baritone voices, try humming low notes</li>
+              <li>• Avoid whispering or shouting</li>
+            </ul>
+          </div>
         </div>
       </section>
 
@@ -404,7 +640,10 @@ export default function App() {
           )}
           
           {analyzing && (
-            <p className="mt-4 text-gray-400 animate-pulse">Analyzing your voice...</p>
+            <div className="mt-4 space-y-2">
+              <p className="text-gray-400 animate-pulse">Analyzing your voice...</p>
+              <p className="text-sm text-gray-500">Applying noise reduction and pitch detection...</p>
+            </div>
           )}
         </div>
       </section>
@@ -494,5 +733,3 @@ export default function App() {
     </div>
   );
 }
-
-
