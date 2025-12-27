@@ -138,22 +138,126 @@ export default function App() {
         const maxFreq = frequencies[frequencies.length - 1];
         const range = getVoiceRange(avgFreq);
 
+        // Comprehensive Song Database (Expanded)
         const songDatabase = {
-          "Bass": ["Ring of Fire – Johnny Cash", "Ain't No Sunshine – Bill Withers", "Stand By Me – Ben E. King"],
-          "Baritone": ["Someone Like You – Adele", "Thinking Out Loud – Ed Sheeran", "Riptide – Vance Joy"],
-          "Tenor": ["Perfect – Ed Sheeran", "Raabta – Arijit Singh", "Shape of You – Ed Sheeran"],
-          "Alto": ["Halo – Beyoncé", "Someone You Loved – Lewis Capaldi", "Stay With Me – Sam Smith"],
-          "Mezzo-Soprano": ["Rolling in the Deep – Adele", "Skyscraper – Demi Lovato", "Girl on Fire – Alicia Keys"],
-          "Soprano": ["I Will Always Love You – Whitney Houston", "Chandelier – Sia", "Vision of Love – Mariah Carey"]
+          "Bass": [
+            "Ring of Fire – Johnny Cash",
+            "Ain't No Sunshine – Bill Withers",
+            "Stand By Me – Ben E. King",
+            "Hurt – Johnny Cash",
+            "Can't Help Falling in Love – Elvis Presley",
+            "Lean On Me – Bill Withers",
+            "Georgia On My Mind – Ray Charles",
+            "What a Wonderful World – Louis Armstrong",
+            "Take Me to Church – Hozier",
+            "Unchained Melody – The Righteous Brothers"
+          ],
+          "Baritone": [
+            "Someone Like You – Adele",
+            "Thinking Out Loud – Ed Sheeran",
+            "Riptide – Vance Joy",
+            "Let Her Go – Passenger",
+            "I'm Yours – Jason Mraz",
+            "Fly Me to the Moon – Frank Sinatra",
+            "All of Me – John Legend",
+            "Budapest – George Ezra",
+            "The Man – Taylor Swift",
+            "Your Song – Elton John",
+            "Stay – Rihanna ft. Mikky Ekko",
+            "Photograph – Ed Sheeran"
+          ],
+          "Tenor": [
+            "Perfect – Ed Sheeran",
+            "Raabta – Arijit Singh",
+            "Shape of You – Ed Sheeran",
+            "Tum Hi Ho – Arijit Singh",
+            "Treat You Better – Shawn Mendes",
+            "Just the Way You Are – Bruno Mars",
+            "Counting Stars – OneRepublic",
+            "Senorita – Shawn Mendes",
+            "Blinding Lights – The Weeknd",
+            "Uptown Funk – Bruno Mars",
+            "Channa Mereya – Arijit Singh",
+            "Love Yourself – Justin Bieber"
+          ],
+          "Alto": [
+            "Halo – Beyoncé",
+            "Someone You Loved – Lewis Capaldi",
+            "Stay With Me – Sam Smith",
+            "Rolling in the Deep – Adele",
+            "Make You Feel My Love – Adele",
+            "Valerie – Amy Winehouse",
+            "Fast Car – Tracy Chapman",
+            "Jolene – Dolly Parton",
+            "Ex's & Oh's – Elle King",
+            "You Say – Lauren Daigle"
+          ],
+          "Mezzo-Soprano": [
+            "Rolling in the Deep – Adele",
+            "Skyscraper – Demi Lovato",
+            "Girl on Fire – Alicia Keys",
+            "Shallow – Lady Gaga",
+            "Titanium – David Guetta ft. Sia",
+            "Set Fire to the Rain – Adele",
+            "Roar – Katy Perry",
+            "Firework – Katy Perry",
+            "Stone Cold – Demi Lovato",
+            "Empire State of Mind – Alicia Keys",
+            "Love Song – Sara Bareilles"
+          ],
+          "Soprano": [
+            "I Will Always Love You – Whitney Houston",
+            "Chandelier – Sia",
+            "Vision of Love – Mariah Carey",
+            "And I Am Telling You – Jennifer Hudson",
+            "Run – Leona Lewis",
+            "Listen – Beyoncé",
+            "Greatest Love of All – Whitney Houston",
+            "My Heart Will Go On – Celine Dion",
+            "The Power of Love – Celine Dion",
+            "Emotions – Mariah Carey",
+            "I Have Nothing – Whitney Houston"
+          ]
         };
 
+        // Comprehensive Artist Database (Expanded)
         const artistDatabase = {
-          "Bass": ["Johnny Cash", "Barry White", "Leonard Cohen"],
-          "Baritone": ["Ed Sheeran", "Frank Sinatra", "John Legend"],
-          "Tenor": ["Arijit Singh", "Shawn Mendes", "Bruno Mars"],
-          "Alto": ["Adele", "Amy Winehouse", "Tracy Chapman"],
-          "Mezzo-Soprano": ["Lady Gaga", "Ariana Grande", "Demi Lovato"],
-          "Soprano": ["Whitney Houston", "Mariah Carey", "Celine Dion"]
+          "Bass": [
+            "Johnny Cash", "Barry White", "Leonard Cohen", "Ray Charles", 
+            "Bill Withers", "Louis Armstrong", "Isaac Hayes", "Hozier",
+            "Elvis Presley", "Bing Crosby"
+          ],
+          "Baritone": [
+            "Ed Sheeran", "Frank Sinatra", "John Legend", "Jason Mraz",
+            "George Ezra", "Passenger", "Michael Bublé", "Sam Smith",
+            "Elton John", "James Arthur", "Vance Joy", "Dean Lewis"
+          ],
+          "Tenor": [
+            "Arijit Singh", "Shawn Mendes", "Bruno Mars", "Justin Bieber",
+            "The Weeknd", "Charlie Puth", "Harry Styles", "Ryan Tedder",
+            "Adam Levine", "Zayn Malik", "Sam Smith", "Troye Sivan"
+          ],
+          "Alto": [
+            "Adele", "Amy Winehouse", "Tracy Chapman", "Norah Jones",
+            "Lana Del Rey", "Billie Eilish", "Toni Braxton", "Lauren Daigle",
+            "Dolly Parton", "Elle King", "Lorde", "Meghan Trainor"
+          ],
+          "Mezzo-Soprano": [
+            "Lady Gaga", "Ariana Grande", "Demi Lovato", "Katy Perry",
+            "Alicia Keys", "Pink", "Kelly Clarkson", "Sara Bareilles",
+            "Christina Aguilera", "Miley Cyrus", "Jessie J", "Selena Gomez"
+          ],
+          "Soprano": [
+            "Whitney Houston", "Mariah Carey", "Celine Dion", "Beyoncé",
+            "Christina Aguilera", "Jennifer Hudson", "Leona Lewis", "Sia",
+            "Idina Menzel", "Barbra Streisand", "Patti LaBelle", "Ariana Grande"
+          ]
+        };
+
+        // Smart Selection: Pick diverse subset from database
+        const selectRandomItems = (array, count) => {
+          const shuffled = [...array].sort(() => Math.random() - 0.5);
+          return shuffled.slice(0, count);
         };
 
         setAnalysis({
