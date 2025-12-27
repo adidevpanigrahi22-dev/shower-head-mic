@@ -139,6 +139,7 @@ export default function App() {
         const range = getVoiceRange(avgFreq);
 
         // Comprehensive Song Database (Expanded)
+        // Comprehensive Song Database (Expanded)
         const songDatabase = {
           "Bass": [
             "Ring of Fire – Johnny Cash",
@@ -259,7 +260,7 @@ export default function App() {
           const shuffled = [...array].sort(() => Math.random() - 0.5);
           return shuffled.slice(0, count);
         };
-
+        
         setAnalysis({
           range,
           avgFrequency: Math.round(avgFreq),
