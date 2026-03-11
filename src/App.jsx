@@ -1,454 +1,612 @@
 import { useState, useRef, useEffect } from "react";
-import { Mic, Music, Sparkles, Waves, Share2, Activity, Download } from "lucide-react";
+
+const GEMINI_KEY = "AIzaSyBdmfz4trCUoX0CVDjF8LtHEnWLbHkbYYw";
+
+const GENRES = ["Pop","Rock","R&B","Hip-Hop","Jazz","Classical","Electronic","Country","Indie","Soul","Latin","Folk"];
+const LANGUAGES = ["English","Hindi","Spanish","French","Korean","Arabic","Portuguese","Italian","Japanese","Swahili"];
+
+const PHASES = [
+  { id:"low",  dur:4, label:"LOWEST NOTE",  sub:"Hold the lowest note you can comfortably sing",   col:"#60a5fa" },
+  { id:"rest", dur:2, label:"REST",          sub:"Take a breath...",                                 col:"#374151" },
+  { id:"high", dur:4, label:"HIGHEST NOTE", sub:"Reach your highest comfortable note — no strain",  col:"#f87171" },
+  { id:"rest2",dur:1, label:"REST",          sub:"Almost there...",                                  col:"#374151" },
+  { id:"free", dur:4, label:"SING FREELY",  sub:"Any melody at your natural, relaxed pitch",        col:"#c8ff47" },
+];
+
+function detectPitchYIN(buf, sr) {
+  const N=buf.length, half=Math.floor(N/2);
+  const y=new Float32Array(half); let rs=0;
+  y[0]=1;
+  for(let t=1;t<half;t++){
+    for(let i=0;i<half;i++){const d=buf[i]-buf[i+t];y[t]+=d*d;}
+    rs+=y[t]; y[t]=y[t]*t/(rs||1);
+  }
+  let tau=-1;
+  for(let i=2;i<half;i++){
+    if(y[i]<0.15){while(i+1<half&&y[i+1]<y[i])i++;tau=i;break;}
+  }
+  if(tau<0||y[tau]>0.5)return -1;
+  if(tau>0&&tau<half-1){const s0=y[tau-1],s1=y[tau],s2=y[tau+1];tau+=(s2-s0)/(2*(2*s1-s2-s0)||1);}
+  return sr/tau;
+}
+
+function freqToNote(f){
+  if(!f||f<20)return"--";
+  const midi=Math.round(12*Math.log2(f/440)+69);
+  if(midi<0||midi>127)return"--";
+  const n=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  return n[midi%12]+(Math.floor(midi/12)-1);
+}
+
+function voiceType(f){
+  if(f<130)return{type:"Bass",         emoji:"🎸",desc:"Deep, resonant and commanding",              col:"#3b82f6"};
+  if(f<180)return{type:"Baritone",     emoji:"🎻",desc:"Rich, warm — the most common male voice",    col:"#8b5cf6"};
+  if(f<260)return{type:"Tenor",        emoji:"🎺",desc:"Bright and powerful high male voice",         col:"#06b6d4"};
+  if(f<340)return{type:"Contralto",    emoji:"🪗",desc:"Deep, warm and richly textured",              col:"#10b981"};
+  if(f<450)return{type:"Mezzo-Soprano",emoji:"🎶",desc:"Versatile middle female voice, warm & full", col:"#f59e0b"};
+  return       {type:"Soprano",        emoji:"✨",desc:"The highest voice — bright and soaring",      col:"#ec4899"};
+}
+
+function calcOctaves(lo,hi){
+  if(!lo||!hi||hi<=lo)return"0.0";
+  return Math.log2(hi/lo).toFixed(1);
+}
+
+function spotifyUrl(q){return`https://open.spotify.com/search/${encodeURIComponent(q)}`;}
+
+const SpotifyIcon=({size=18})=>(
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="#1db954">
+    <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+  </svg>
+);
 
 export default function App() {
-  const [recording, setRecording] = useState(false);
-  const [audioURL, setAudioURL] = useState(null);
-  const [analysis, setAnalysis] = useState(null);
-  const [liveFrequency, setLiveFrequency] = useState(0);
-  const [liveVolume, setLiveVolume] = useState(0);
-  const [analyzing, setAnalyzing] = useState(false);
+  const [step,      setStep]      = useState("prefs");
+  const [genres,    setGenres]    = useState([]);
+  const [langs,     setLangs]     = useState([]);
+  const [phaseIdx,  setPhaseIdx]  = useState(0);
+  const [timer,     setTimer]     = useState(0);
+  const [liveHz,    setLiveHz]    = useState(0);
+  const [liveVol,   setLiveVol]   = useState(0);
+  const [profile,   setProfile]   = useState(null);
+  const [aiData,    setAiData]    = useState(null);
+  const [aiErr,     setAiErr]     = useState(null);
+  const [totalProg, setTotalProg] = useState(0);
 
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const audioContextRef = useRef(null);
-  const analyserRef = useRef(null);
-  const animationFrameRef = useRef(null);
-  const reportRef = useRef(null);
-  const noiseGateRef = useRef(null);
+  const phBuckets = useRef({low:[],high:[],free:[]});
+  const phIdx     = useRef(0);
+  const raf       = useRef(null);
+  const tickRef   = useRef(null);
+  const ctxRef    = useRef(null);
+  const anlRef    = useRef(null);
   const streamRef = useRef(null);
+  const totalDur  = PHASES.reduce((s,p)=>s+p.dur,0);
 
-  const getVoiceRange = (avgFreq) => {
-    if (avgFreq < 130) return "Bass";
-    if (avgFreq < 180) return "Baritone";
-    if (avgFreq < 280) return "Tenor";
-    if (avgFreq < 350) return "Alto";
-    if (avgFreq < 450) return "Mezzo-Soprano";
-    return "Soprano";
+  useEffect(()=>{
+    const el=document.createElement("link");
+    el.rel="stylesheet";
+    el.href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap";
+    document.head.appendChild(el);
+    return()=>{try{document.head.removeChild(el);}catch(_){}};
+  },[]);
+
+  const toggle=(_arr,setFn,v)=>setFn(p=>p.includes(v)?p.filter(x=>x!==v):[...p,v]);
+
+  const C={bg:"#07070f",surf:"#0f0f1e",dim:"#181830",border:"#252545",text:"#e8e8f4",muted:"#6b7090",accent:"#c8ff47"};
+  const card={background:C.surf,borderRadius:16,padding:24,border:`1px solid ${C.border}`};
+  const chip=(active,col)=>({
+    padding:"7px 15px",borderRadius:100,
+    border:`1.5px solid ${active?col||C.accent:C.border}`,
+    background:active?col||C.accent:"transparent",
+    color:active?C.bg:C.text,
+    fontSize:13,fontWeight:500,cursor:"pointer",transition:"all 0.15s",fontFamily:"inherit"
+  });
+
+  const startSession=async()=>{
+    try{
+      const s=await navigator.mediaDevices.getUserMedia({audio:true});
+      streamRef.current=s;
+      ctxRef.current=new(window.AudioContext||window.webkitAudioContext)();
+      const src=ctxRef.current.createMediaStreamSource(s);
+      anlRef.current=ctxRef.current.createAnalyser();
+      anlRef.current.fftSize=2048;
+      src.connect(anlRef.current);
+      phBuckets.current={low:[],high:[],free:[]};
+      phIdx.current=0;
+      setStep("recording");
+      runPhase(0,0);
+      listenAudio();
+    }catch(e){alert("Microphone access is required. Please allow it and try again.");}
   };
 
-  // Optimized YIN Pitch Detection (Fast & Accurate)
-  const detectPitchYIN = (buffer, sampleRate) => {
-    const SIZE = buffer.length;
-    const threshold = 0.15;
-    const yinBuffer = new Float32Array(SIZE / 2);
-
-    // Step 1: Difference Function
-    for (let tau = 1; tau < SIZE / 2; tau++) {
-      for (let i = 0; i < SIZE / 2; i++) {
-        const delta = buffer[i] - buffer[i + tau];
-        yinBuffer[tau] += delta * delta;
+  const runPhase=(idx,elapsed)=>{
+    phIdx.current=idx;
+    setPhaseIdx(idx);
+    let t=PHASES[idx].dur;
+    setTimer(t);
+    const iv=setInterval(()=>{
+      t--;
+      setTimer(t);
+      setTotalProg(Math.min(100,((elapsed+(PHASES[idx].dur-t))/totalDur)*100));
+      if(t<=0){
+        clearInterval(iv);
+        const ne=elapsed+PHASES[idx].dur;
+        if(idx<PHASES.length-1)runPhase(idx+1,ne);
+        else finish();
       }
-    }
+    },1000);
+    tickRef.current=iv;
+  };
 
-    // Step 2: Cumulative Mean Normalized Difference
-    let runningSum = 0;
-    yinBuffer[0] = 1;
-    for (let tau = 1; tau < SIZE / 2; tau++) {
-      runningSum += yinBuffer[tau];
-      yinBuffer[tau] *= tau / (runningSum || 1);
-    }
-
-    // Step 3: Absolute Threshold
-    let tau = -1;
-    for (let i = 2; i < SIZE / 2; i++) {
-      if (yinBuffer[i] < threshold) {
-        while (i + 1 < SIZE / 2 && yinBuffer[i + 1] < yinBuffer[i]) {
-          i++;
+  const listenAudio=()=>{
+    const buf=new Float32Array(anlRef.current.fftSize);
+    const loop=()=>{
+      if(!anlRef.current)return;
+      anlRef.current.getFloatTimeDomainData(buf);
+      let sum=0;
+      for(let i=0;i<buf.length;i++)sum+=buf[i]*buf[i];
+      const rms=Math.sqrt(sum/buf.length);
+      setLiveVol(Math.min(rms*700,100));
+      let zc=0;
+      for(let i=1;i<buf.length;i++)
+        if((buf[i]>0&&buf[i-1]<=0)||(buf[i]<0&&buf[i-1]>=0))zc++;
+      if(rms>0.018&&zc/buf.length<0.15){
+        const f=detectPitchYIN(buf,ctxRef.current.sampleRate);
+        if(f>50&&f<1200){
+          setLiveHz(Math.round(f));
+          const pid=PHASES[phIdx.current]?.id;
+          if(["low","high","free"].includes(pid))phBuckets.current[pid].push(f);
         }
-        tau = i;
-        break;
-      }
-    }
-
-    if (tau === -1 || yinBuffer[tau] > 0.5) return -1;
-
-    // Step 4: Parabolic Interpolation for sub-sample accuracy
-    let betterTau = tau;
-    if (tau > 0 && tau < SIZE / 2 - 1) {
-      const s0 = yinBuffer[tau - 1];
-      const s1 = yinBuffer[tau];
-      const s2 = yinBuffer[tau + 1];
-      betterTau = tau + (s2 - s0) / (2 * (2 * s1 - s2 - s0) || 1);
-    }
-
-    return sampleRate / betterTau;
-  };
-
-  const applyHighPassFilter = (buffer, cutoffFreq = 80) => {
-    const channelData = buffer.getChannelData(0);
-    const sampleRate = buffer.sampleRate;
-    const rc = 1.0 / (2 * Math.PI * cutoffFreq);
-    const dt = 1.0 / sampleRate;
-    const alpha = rc / (rc + dt);
-    const filtered = new Float32Array(channelData.length);
-    filtered[0] = channelData[0];
-    for (let i = 1; i < channelData.length; i++) {
-      filtered[i] = alpha * (filtered[i - 1] + channelData[i] - channelData[i - 1]);
-    }
-    const filteredBuffer = audioContextRef.current.createBuffer(1, filtered.length, sampleRate);
-    filteredBuffer.copyToChannel(filtered, 0);
-    return filteredBuffer;
-  };
-
-  const analyzeAudioBlob = async (blob) => {
-    setAnalyzing(true);
-    try {
-      const arrayBuffer = await blob.arrayBuffer();
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      audioContextRef.current = audioContext;
-      let audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-      
-      // Accuracy Boost: Filter out low frequency room rumble
-      audioBuffer = applyHighPassFilter(audioBuffer, 85);
-      const channelData = audioBuffer.getChannelData(0);
-      const sampleRate = audioBuffer.sampleRate;
-      
-      const frequencies = [];
-      const chunkSize = 2048; 
-      const hopSize = 1024; // 50% overlap for better resolution
-
-      for (let i = 0; i < channelData.length - chunkSize; i += hopSize) {
-        const slice = channelData.slice(i, i + chunkSize);
-        
-        // Calculate RMS (Volume)
-        const rms = Math.sqrt(slice.reduce((sum, val) => sum + val * val, 0) / slice.length);
-        
-        // Calculate Zero Crossing Rate (Helps distinguish pitch from noise)
-        let crossings = 0;
-        for (let j = 1; j < slice.length; j++) {
-          if ((slice[j] > 0 && slice[j-1] <= 0) || (slice[j] < 0 && slice[j-1] >= 0)) crossings++;
-        }
-        const zcr = crossings / slice.length;
-
-        // VAD (Voice Activity Detection): Only analyze if loud enough and not "noisy" (hiss)
-        if (rms > 0.02 && zcr < 0.15) {
-          const freq = detectPitchYIN(slice, sampleRate);
-          if (freq > 65 && freq < 1000) {
-            frequencies.push(freq);
-          }
-        }
-      }
-
-      if (frequencies.length > 0) {
-        frequencies.sort((a, b) => a - b);
-        // Use Median for average to ignore outliers/glitches
-        const avgFreq = frequencies[Math.floor(frequencies.length / 2)];
-        const minFreq = frequencies[0];
-        const maxFreq = frequencies[frequencies.length - 1];
-        const range = getVoiceRange(avgFreq);
-
-        // Comprehensive Song Database (Expanded)
-        // Comprehensive Song Database (Expanded)
-        const songDatabase = {
-          "Bass": [
-            "Ring of Fire – Johnny Cash",
-            "Ain't No Sunshine – Bill Withers",
-            "Stand By Me – Ben E. King",
-            "Hurt – Johnny Cash",
-            "Can't Help Falling in Love – Elvis Presley",
-            "Lean On Me – Bill Withers",
-            "Georgia On My Mind – Ray Charles",
-            "What a Wonderful World – Louis Armstrong",
-            "Take Me to Church – Hozier",
-            "Unchained Melody – The Righteous Brothers"
-          ],
-          "Baritone": [
-            "Someone Like You – Adele",
-            "Thinking Out Loud – Ed Sheeran",
-            "Riptide – Vance Joy",
-            "Let Her Go – Passenger",
-            "I'm Yours – Jason Mraz",
-            "Fly Me to the Moon – Frank Sinatra",
-            "All of Me – John Legend",
-            "Budapest – George Ezra",
-            "The Man – Taylor Swift",
-            "Your Song – Elton John",
-            "Stay – Rihanna ft. Mikky Ekko",
-            "Photograph – Ed Sheeran"
-          ],
-          "Tenor": [
-            "Perfect – Ed Sheeran",
-            "Raabta – Arijit Singh",
-            "Shape of You – Ed Sheeran",
-            "Tum Hi Ho – Arijit Singh",
-            "Treat You Better – Shawn Mendes",
-            "Just the Way You Are – Bruno Mars",
-            "Counting Stars – OneRepublic",
-            "Senorita – Shawn Mendes",
-            "Blinding Lights – The Weeknd",
-            "Uptown Funk – Bruno Mars",
-            "Channa Mereya – Arijit Singh",
-            "Love Yourself – Justin Bieber"
-          ],
-          "Alto": [
-            "Halo – Beyoncé",
-            "Someone You Loved – Lewis Capaldi",
-            "Stay With Me – Sam Smith",
-            "Rolling in the Deep – Adele",
-            "Make You Feel My Love – Adele",
-            "Valerie – Amy Winehouse",
-            "Fast Car – Tracy Chapman",
-            "Jolene – Dolly Parton",
-            "Ex's & Oh's – Elle King",
-            "You Say – Lauren Daigle"
-          ],
-          "Mezzo-Soprano": [
-            "Rolling in the Deep – Adele",
-            "Skyscraper – Demi Lovato",
-            "Girl on Fire – Alicia Keys",
-            "Shallow – Lady Gaga",
-            "Titanium – David Guetta ft. Sia",
-            "Set Fire to the Rain – Adele",
-            "Roar – Katy Perry",
-            "Firework – Katy Perry",
-            "Stone Cold – Demi Lovato",
-            "Empire State of Mind – Alicia Keys",
-            "Love Song – Sara Bareilles"
-          ],
-          "Soprano": [
-            "I Will Always Love You – Whitney Houston",
-            "Chandelier – Sia",
-            "Vision of Love – Mariah Carey",
-            "And I Am Telling You – Jennifer Hudson",
-            "Run – Leona Lewis",
-            "Listen – Beyoncé",
-            "Greatest Love of All – Whitney Houston",
-            "My Heart Will Go On – Celine Dion",
-            "The Power of Love – Celine Dion",
-            "Emotions – Mariah Carey",
-            "I Have Nothing – Whitney Houston"
-          ]
-        };
-
-        // Comprehensive Artist Database (Expanded)
-        const artistDatabase = {
-          "Bass": [
-            "Johnny Cash", "Barry White", "Leonard Cohen", "Ray Charles", 
-            "Bill Withers", "Louis Armstrong", "Isaac Hayes", "Hozier",
-            "Elvis Presley", "Bing Crosby"
-          ],
-          "Baritone": [
-            "Ed Sheeran", "Frank Sinatra", "John Legend", "Jason Mraz",
-            "George Ezra", "Passenger", "Michael Bublé", "Sam Smith",
-            "Elton John", "James Arthur", "Vance Joy", "Dean Lewis"
-          ],
-          "Tenor": [
-            "Arijit Singh", "Shawn Mendes", "Bruno Mars", "Justin Bieber",
-            "The Weeknd", "Charlie Puth", "Harry Styles", "Ryan Tedder",
-            "Adam Levine", "Zayn Malik", "Sam Smith", "Troye Sivan"
-          ],
-          "Alto": [
-            "Adele", "Amy Winehouse", "Tracy Chapman", "Norah Jones",
-            "Lana Del Rey", "Billie Eilish", "Toni Braxton", "Lauren Daigle",
-            "Dolly Parton", "Elle King", "Lorde", "Meghan Trainor"
-          ],
-          "Mezzo-Soprano": [
-            "Lady Gaga", "Ariana Grande", "Demi Lovato", "Katy Perry",
-            "Alicia Keys", "Pink", "Kelly Clarkson", "Sara Bareilles",
-            "Christina Aguilera", "Miley Cyrus", "Jessie J", "Selena Gomez"
-          ],
-          "Soprano": [
-            "Whitney Houston", "Mariah Carey", "Celine Dion", "Beyoncé",
-            "Christina Aguilera", "Jennifer Hudson", "Leona Lewis", "Sia",
-            "Idina Menzel", "Barbra Streisand", "Patti LaBelle", "Ariana Grande"
-          ]
-        };
-
-        // Smart Selection: Pick diverse subset from database
-        const selectRandomItems = (array, count) => {
-          const shuffled = [...array].sort(() => Math.random() - 0.5);
-          return shuffled.slice(0, count);
-        };
-        
-        setAnalysis({
-          range,
-          avgFrequency: Math.round(avgFreq),
-          minFreq: Math.round(minFreq),
-          maxFreq: Math.round(maxFreq),
-          songs: songDatabase[range] || ["Perfect – Ed Sheeran"],
-          artists: artistDatabase[range] || ["Arijit Singh"],
-        });
-      }
-      audioContext.close();
-    } catch (error) {
-      console.error("Analysis error:", error);
-    }
-    setAnalyzing(false);
-  };
-
-  const monitorFrequency = () => {
-    if (!analyserRef.current) return;
-    const timeDataArray = new Float32Array(analyserRef.current.fftSize);
-    const update = () => {
-      analyserRef.current.getFloatTimeDomainData(timeDataArray);
-      const pitch = detectPitchYIN(timeDataArray, audioContextRef.current.sampleRate);
-      if (pitch > 60 && pitch < 1000) {
-        setLiveFrequency(Math.round(pitch));
-      }
-      // Simple volume check for the UI bar
-      let sum = 0;
-      for(let i=0; i<timeDataArray.length; i++) sum += timeDataArray[i] * timeDataArray[i];
-      setLiveVolume(Math.sqrt(sum / timeDataArray.length) * 500); 
-
-      animationFrameRef.current = requestAnimationFrame(update);
+      }else setLiveHz(0);
+      raf.current=requestAnimationFrame(loop);
     };
-    update();
+    loop();
   };
 
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      const source = audioContextRef.current.createMediaStreamSource(stream);
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 2048;
-      source.connect(analyserRef.current);
-      monitorFrequency();
+  const finish=()=>{
+    if(raf.current)cancelAnimationFrame(raf.current);
+    if(tickRef.current)clearInterval(tickRef.current);
+    if(streamRef.current)streamRef.current.getTracks().forEach(t=>t.stop());
 
-      mediaRecorderRef.current = new MediaRecorder(stream);
-      audioChunksRef.current = [];
-      mediaRecorderRef.current.ondataavailable = (e) => audioChunksRef.current.push(e.data);
-      mediaRecorderRef.current.onstop = async () => {
-        const blob = new Blob(audioChunksRef.current, { type: "audio/wav" });
-        setAudioURL(URL.createObjectURL(blob));
-        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-        await analyzeAudioBlob(blob);
-        stream.getTracks().forEach(t => t.stop());
-      };
-      mediaRecorderRef.current.start();
-      setRecording(true);
-    } catch (e) { alert("Mic access required"); }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && recording) {
-      mediaRecorderRef.current.stop();
-      setRecording(false);
-    }
-  };
-
-  const downloadReport = async () => {
-    if (!reportRef.current) return;
-    const loadHtml2Canvas = () => {
-      return new Promise((resolve) => {
-        if (window.html2canvas) return resolve(window.html2canvas);
-        const script = document.createElement('script');
-        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-        script.onload = () => resolve(window.html2canvas);
-        document.head.appendChild(script);
-      });
+    const {low,high,free}=phBuckets.current;
+    const med=arr=>{
+      if(!arr.length)return null;
+      const s=[...arr].sort((a,b)=>a-b);
+      return s[Math.floor(s.length/2)];
     };
-    const html2canvas = await loadHtml2Canvas();
-    const canvas = await html2canvas(reportRef.current, { scale: 2 });
-    const link = document.createElement('a');
-    link.href = canvas.toDataURL('image/png');
-    link.download = `voice-report.png`;
-    link.click();
+    const loSorted=[...low].sort((a,b)=>a-b);
+    const loFreq=loSorted.length?med(loSorted.slice(0,Math.max(1,Math.floor(loSorted.length*0.3)))):null;
+    const hiSorted=[...high].sort((a,b)=>b-a);
+    const hiFreq=hiSorted.length?med(hiSorted.slice(0,Math.max(1,Math.floor(hiSorted.length*0.3)))):null;
+    const avgFreq=med([...free]);
+
+    if(!avgFreq&&!loFreq){
+      alert("Voice not detected clearly. Try again in a quieter space, closer to the mic.");
+      setStep("prefs"); return;
+    }
+    const effLo=loFreq||(avgFreq*0.68);
+    const effHi=hiFreq||(avgFreq*1.85);
+    const effAvg=avgFreq||((effLo+effHi)/2);
+    const vt=voiceType(effAvg);
+    const p={
+      loFreq:Math.round(effLo),hiFreq:Math.round(effHi),avgFreq:Math.round(effAvg),
+      loNote:freqToNote(effLo),hiNote:freqToNote(effHi),avgNote:freqToNote(effAvg),
+      octaves:calcOctaves(effLo,effHi),...vt
+    };
+    setProfile(p);
+    setStep("analyzing");
+    fetchGemini(p,[...genres],[...langs]);
   };
 
-  return (
-    <div className="min-h-screen bg-black text-white font-sans">
-      <section className="h-screen flex flex-col justify-center items-center text-center px-6">
-        <h1 className="text-6xl md:text-7xl font-extrabold tracking-tight animate-pulse">
-          SHOWER HEAD MIC
-        </h1>
-        <p className="mt-6 max-w-xl text-gray-300 text-lg">
-          Discover your voice range, song matches, and artist similarities — instantly.
-        </p>
-        <p className="mt-2 text-sm text-gray-500">✨ Now with advanced noise cancellation</p>
-      </section>
+  const fetchGemini=async(p,g,l)=>{
+    const prompt=`You are a world-class vocal coach and music expert. Analyze this voice data and give deeply personalized recommendations.
 
-      <section className="py-24 px-6 bg-white text-black">
-        <div className="max-w-4xl mx-auto">
-          <h2 className="text-4xl font-bold text-center">How to use</h2>
-          <ol className="mt-10 space-y-6 text-lg">
-            <li><b>1.</b> Click <b>Start Recording</b> and allow microphone access.</li>
-            <li><b>2.</b> Sing or hum comfortably for 5–10 seconds.</li>
-            <li><b>3.</b> Click <b>Stop Recording</b>.</li>
-            <li><b>4.</b> View your voice range, song suggestions, and artist matches.</li>
-          </ol>
-          <div className="mt-8 p-6 bg-blue-50 rounded-xl border border-blue-200">
-            <h3 className="font-bold text-lg">🎯 Tips for Best Results:</h3>
-            <ul className="mt-3 space-y-2 text-sm">
-              <li>• Record in a quiet environment</li>
-              <li>• Sing at your natural, comfortable pitch</li>
-              <li>• Hold sustained notes for 2-3 seconds</li>
-            </ul>
+VOICE DATA:
+- Voice Type: ${p.type}
+- Natural Pitch: ${p.avgFreq}Hz (note: ${p.avgNote})
+- Lowest Note Detected: ${p.loNote} (${p.loFreq}Hz)
+- Highest Note Detected: ${p.hiNote} (${p.hiFreq}Hz)
+- Vocal Span: ${p.octaves} octaves
+
+USER PREFERENCES:
+- Favourite Genres: ${g.join(", ")||"open to anything"}
+- Preferred Languages: ${l.join(", ")||"any"}
+
+Respond with ONLY a raw valid JSON object — no markdown, no code fences, just the JSON:
+{
+  "insight": "2-3 sentences about what makes this voice special. Reference the specific Hz values, octave span, and voice type. Make it feel personal and exciting.",
+  "singers": [
+    {"name": "Famous Singer", "why": "One specific sentence about the vocal similarity — reference their range or tone"},
+    {"name": "Famous Singer", "why": "..."},
+    {"name": "Famous Singer", "why": "..."},
+    {"name": "Famous Singer", "why": "..."}
+  ],
+  "songs": [
+    {"title": "Song Title", "artist": "Artist Name", "why": "Brief reason this fits their exact range"},
+    {"title": "Song Title", "artist": "Artist Name", "why": "..."},
+    {"title": "Song Title", "artist": "Artist Name", "why": "..."},
+    {"title": "Song Title", "artist": "Artist Name", "why": "..."},
+    {"title": "Song Title", "artist": "Artist Name", "why": "..."},
+    {"title": "Song Title", "artist": "Artist Name", "why": "..."}
+  ],
+  "tip": "One specific, actionable vocal exercise they can practice this week, tailored to their voice type and octave span"
+}
+
+Prioritize artists and songs matching their genre and language preferences. Include artists who sing primarily in their preferred language(s). All recommendations must feel genuinely tailored — not generic.`;
+
+    try{
+      const res=await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
+        {method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            contents:[{parts:[{text:prompt}]}],
+            generationConfig:{temperature:0.85,maxOutputTokens:1400}
+          })}
+      );
+      if(!res.ok){
+        const errBody=await res.json().catch(()=>({}));
+        throw new Error(errBody?.error?.message||`HTTP ${res.status}`);
+      }
+      const d=await res.json();
+      const txt=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
+      const clean=txt.replace(/```json\n?|\n?```/g,"").replace(/```/g,"").trim();
+      setAiData(JSON.parse(clean));
+    }catch(e){
+      console.error("Gemini error:",e);
+      setAiErr(`Gemini error: ${e.message}`);
+    }
+    setStep("results");
+  };
+
+  const reset=()=>{
+    setStep("prefs");setProfile(null);setAiData(null);setAiErr(null);setTotalProg(0);
+  };
+
+  // ── PREFS ─────────────────────────────────────────────────────────────────
+  if(step==="prefs") return(
+    <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:'"DM Sans",sans-serif',overflowX:"hidden"}}>
+      <style>{`.chip:hover{opacity:.75}`}</style>
+      <div style={{maxWidth:640,margin:"0 auto",padding:"clamp(28px,5vw,56px) 20px"}}>
+
+        {/* Hero */}
+        <div style={{textAlign:"center",marginBottom:44}}>
+          <div style={{fontSize:10,letterSpacing:6,color:C.muted,marginBottom:10,textTransform:"uppercase"}}>AI · Voice Analysis</div>
+          <h1 style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:"clamp(64px,15vw,112px)",
+            lineHeight:.88,letterSpacing:2,margin:0}}>
+            SHOWER<br/><span style={{color:C.accent}}>HEAD MIC</span>
+          </h1>
+          <p style={{color:C.muted,marginTop:18,fontSize:15,lineHeight:1.7,maxWidth:400,margin:"18px auto 0"}}>
+            Discover your vocal range, octave span, and get Gemini‑powered song &amp; artist matches tailored to your voice.
+          </p>
+        </div>
+
+        {/* Genre */}
+        <div style={{marginBottom:28}}>
+          <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:12,textTransform:"uppercase"}}>Genres you love</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+            {GENRES.map(g=>(
+              <button key={g} className="chip" style={chip(genres.includes(g))}
+                onClick={()=>toggle(genres,setGenres,g)}>{g}</button>
+            ))}
           </div>
         </div>
-      </section>
 
-      <section className="py-24 px-6 bg-black">
-        <div className="max-w-5xl mx-auto text-center">
-          <h2 className="text-4xl font-bold">Record your voice</h2>
-          {recording && (
-            <div className="mt-8 p-6 bg-gray-900 rounded-2xl inline-block">
-              <div className="flex items-center gap-4">
-                <Activity className="animate-pulse text-red-500" size={32} />
-                <div className="text-left">
-                  <p className="text-sm text-gray-400">Live Analysis</p>
-                  <p className="text-2xl font-bold">{liveFrequency} Hz</p>
-                  <p className="text-sm text-gray-400">Current Range: {getVoiceRange(liveFrequency)}</p>
-                </div>
-              </div>
-              <div className="mt-4 h-2 bg-gray-800 rounded-full overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-100" style={{ width: `${Math.min(liveVolume, 100)}%` }} />
-              </div>
-            </div>
-          )}
-          <button onClick={recording ? stopRecording : startRecording} className={`mt-8 inline-flex items-center gap-2 px-8 py-4 rounded-2xl text-lg font-semibold transition ${recording ? "bg-red-500 text-white hover:bg-red-600" : "bg-white text-black hover:scale-105"}`}>
-            <Mic /> {recording ? "Stop Recording" : "Start Recording"}
-          </button>
-          {audioURL && <div className="mt-6"><audio controls src={audioURL} className="mx-auto" /></div>}
-          {analyzing && <div className="mt-4 space-y-2"><p className="text-gray-400 animate-pulse">Analyzing your voice...</p></div>}
+        {/* Language */}
+        <div style={{marginBottom:36}}>
+          <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:12,textTransform:"uppercase"}}>Languages you sing in</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+            {LANGUAGES.map(l=>(
+              <button key={l} className="chip" style={chip(langs.includes(l))}
+                onClick={()=>toggle(langs,setLangs,l)}>{l}</button>
+            ))}
+          </div>
         </div>
-      </section>
 
-      <section className="py-24 px-6 bg-white text-black">
-        <div className="max-w-4xl mx-auto text-center">
-          <h2 className="text-4xl font-bold">Your Voice Report</h2>
-          {!analysis && <p className="mt-6 text-gray-500">Record to generate your report</p>}
-          {analysis && (
-            <>
-              <div ref={reportRef} className="mt-12 p-8 bg-white rounded-3xl shadow-2xl">
-                <div className="mb-8">
-                  <h1 className="text-5xl font-extrabold tracking-tight bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">SHOWER HEAD MIC</h1>
-                  <p className="text-gray-500 mt-2">Voice Analysis Report</p>
-                </div>
-                <div className="grid md:grid-cols-3 gap-8">
-                  <div className="p-6 rounded-2xl shadow-xl bg-gradient-to-br from-purple-50 to-blue-50 border-2 border-purple-200">
-                    <Sparkles className="mx-auto text-purple-600" size={40} />
-                    <h3 className="mt-4 text-xl font-semibold">Voice Range</h3>
-                    <p className="mt-2 text-3xl font-bold text-purple-600">{analysis.range}</p>
-                    <p className="mt-2 text-sm text-gray-600">{analysis.minFreq}Hz - {analysis.maxFreq}Hz</p>
-                  </div>
-                  <div className="p-6 rounded-2xl shadow-xl bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-200">
-                    <Music className="mx-auto text-green-600" size={40} />
-                    <h3 className="mt-4 text-xl font-semibold">Song Matches</h3>
-                    <ul className="mt-2 text-sm space-y-1">{analysis.songs.map((s, i) => <li key={i} className="text-gray-700">{s}</li>)}</ul>
-                  </div>
-                  <div className="p-6 rounded-2xl shadow-xl bg-gradient-to-br from-orange-50 to-red-50 border-2 border-orange-200">
-                    <Waves className="mx-auto text-orange-600" size={40} />
-                    <h3 className="mt-4 text-xl font-semibold">Artist Similarity</h3>
-                    <p className="mt-2 text-sm text-gray-700">{analysis.artists.join(", ")}</p>
-                  </div>
+        {/* Session guide */}
+        <div style={{...card,marginBottom:32}}>
+          <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:16,textTransform:"uppercase"}}>
+            What happens · {totalDur}s total
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            {[
+              {col:"#60a5fa",emoji:"🎵",label:"Lowest note · 4s",  desc:"Hold the deepest note you can comfortably reach"},
+              {col:"#f87171",emoji:"🎶",label:"Highest note · 4s", desc:"Reach your highest comfortable note — no straining!"},
+              {col:C.accent, emoji:"🎤",label:"Sing freely · 4s",  desc:"Any melody at your natural pitch for Gemini to understand your voice"},
+            ].map(({col,emoji,label,desc},i)=>(
+              <div key={i} style={{display:"flex",gap:14,alignItems:"flex-start"}}>
+                <div style={{width:34,height:34,borderRadius:9,background:col+"22",flexShrink:0,
+                  display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{emoji}</div>
+                <div>
+                  <div style={{fontWeight:600,fontSize:14,color:C.text,marginBottom:2}}>{label}</div>
+                  <div style={{fontSize:12,color:C.muted,lineHeight:1.55}}>{desc}</div>
                 </div>
               </div>
-              <div className="mt-10 flex gap-4 justify-center flex-wrap">
-                <button onClick={downloadReport} className="inline-flex items-center gap-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white px-6 py-3 rounded-xl hover:from-purple-700 hover:to-blue-700 transition shadow-lg">
-                  <Download size={20} /> Download Report
-                </button>
-                <button className="inline-flex items-center gap-2 border-2 border-black px-6 py-3 rounded-xl hover:bg-black hover:text-white transition">
-                  <Share2 /> Share Report Card
-                </button>
-              </div>
-            </>
-          )}
+            ))}
+          </div>
         </div>
-      </section>
-      <footer className="py-10 text-center text-gray-500 bg-black">© 2025 NoteHeads</footer>
+
+        <button onClick={startSession}
+          style={{width:"100%",padding:"20px",borderRadius:14,background:C.accent,color:C.bg,
+            border:"none",fontFamily:'"Bebas Neue",sans-serif',fontSize:24,letterSpacing:4,
+            cursor:"pointer",transition:"opacity 0.15s"}}
+          onMouseEnter={e=>e.currentTarget.style.opacity=".85"}
+          onMouseLeave={e=>e.currentTarget.style.opacity="1"}>
+          START ANALYSIS
+        </button>
+        <p style={{textAlign:"center",fontSize:11,color:C.muted,marginTop:10}}>
+          Requires microphone · No audio is stored
+        </p>
+      </div>
     </div>
   );
+
+  // ── RECORDING ─────────────────────────────────────────────────────────────
+  if(step==="recording"){
+    const phase=PHASES[phaseIdx];
+    const isActive=!phase.id.startsWith("rest");
+    return(
+      <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:'"DM Sans",sans-serif',
+        display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+        padding:24,textAlign:"center"}}>
+        <style>{`
+          @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+          @keyframes glow{0%,100%{text-shadow:0 0 60px var(--gc)}50%{text-shadow:0 0 140px var(--gc),0 0 220px var(--gc)}}
+        `}</style>
+
+        <div style={{fontSize:10,letterSpacing:6,color:C.muted,marginBottom:8,textTransform:"uppercase"}}>
+          Phase {phaseIdx+1} of {PHASES.length}
+        </div>
+
+        <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:"clamp(40px,9vw,76px)",
+          lineHeight:1,color:phase.col,letterSpacing:3,marginBottom:10}}>
+          {phase.label}
+        </div>
+        <p style={{color:C.muted,fontSize:14,maxWidth:340,lineHeight:1.6,marginBottom:36}}>
+          {phase.sub}
+        </p>
+
+        {/* Big countdown */}
+        <div style={{"--gc":phase.col,fontFamily:'"Bebas Neue",sans-serif',
+          fontSize:"clamp(120px,26vw,210px)",lineHeight:1,
+          color:isActive?phase.col:C.dim,marginBottom:24,
+          animation:isActive&&timer<=2?"glow 0.7s infinite":"none"}}>
+          {timer}
+        </div>
+
+        {/* Live pitch */}
+        {isActive&&(
+          <div style={{marginBottom:24}}>
+            <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:48,lineHeight:1,
+              color:liveHz>0?C.accent:C.dim,transition:"color 0.1s"}}>
+              {liveHz>0?`${liveHz} Hz`:"· · ·"}
+            </div>
+            <div style={{fontSize:15,color:liveHz>0?C.text:C.muted,marginTop:3,letterSpacing:1,fontWeight:500}}>
+              {liveHz>0?freqToNote(liveHz):"sing into your mic"}
+            </div>
+          </div>
+        )}
+
+        {/* Volume bar */}
+        {isActive&&(
+          <div style={{width:"min(300px,80vw)",marginBottom:32}}>
+            <div style={{height:7,background:C.dim,borderRadius:4,overflow:"hidden"}}>
+              <div style={{height:"100%",borderRadius:4,
+                background:`linear-gradient(90deg,${phase.col},${C.accent})`,
+                width:`${liveVol}%`,transition:"width 0.05s"}}/>
+            </div>
+            {liveHz===0&&(
+              <div style={{fontSize:11,color:C.muted,marginTop:5,animation:"pulse 2s infinite"}}>
+                No pitch detected — sing clearly
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Overall progress */}
+        <div style={{width:"min(300px,80vw)"}}>
+          <div style={{height:3,background:C.dim,borderRadius:2,overflow:"hidden"}}>
+            <div style={{height:"100%",background:C.accent,borderRadius:2,
+              width:`${totalProg}%`,transition:"width 1s linear"}}/>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:5,fontSize:11,color:C.muted}}>
+            <span>Total progress</span><span>{Math.round(totalProg)}%</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── ANALYZING ─────────────────────────────────────────────────────────────
+  if(step==="analyzing") return(
+    <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:'"DM Sans",sans-serif',
+      display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:18}}>
+      <style>{`
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+      `}</style>
+      <div style={{width:68,height:68,borderRadius:"50%",
+        border:`3px solid #1a1a2e`,borderTop:`3px solid ${C.accent}`,
+        animation:"spin 1s linear infinite"}}/>
+      <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:34,letterSpacing:5}}>ANALYZING</div>
+      <div style={{fontSize:13,color:C.muted,maxWidth:280,textAlign:"center",lineHeight:1.65}}>
+        Sending your voice data to Gemini for personalized recommendations...
+      </div>
+      {profile&&(
+        <div style={{...card,marginTop:6,animation:"fadeUp 0.4s ease",textAlign:"center",minWidth:220}}>
+          <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:30,color:profile.col,lineHeight:1}}>
+            {profile.emoji} {profile.type}
+          </div>
+          <div style={{fontSize:12,color:C.muted,marginTop:4}}>
+            {profile.loNote} → {profile.hiNote} · {profile.octaves} oct
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  // ── RESULTS ───────────────────────────────────────────────────────────────
+  if(step==="results"&&profile){
+    const pct=Math.max(10,Math.min(88,
+      (Math.log2(profile.avgFreq/profile.loFreq)/Math.log2(profile.hiFreq/profile.loFreq))*84+4
+    ));
+    return(
+      <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:'"DM Sans",sans-serif',overflowX:"hidden"}}>
+        <style>{`
+          @keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+          .hov-card:hover{border-color:rgba(200,255,71,.4) !important}
+        `}</style>
+        <div style={{maxWidth:640,margin:"0 auto",padding:"clamp(28px,5vw,52px) 20px"}}>
+
+          {/* Header */}
+          <div style={{textAlign:"center",marginBottom:32,animation:"fadeUp 0.3s ease"}}>
+            <div style={{fontSize:10,letterSpacing:6,color:C.muted,marginBottom:8,textTransform:"uppercase"}}>
+              Voice Report
+            </div>
+            <div style={{fontSize:52,marginBottom:4}}>{profile.emoji}</div>
+            <h2 style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:"clamp(48px,10vw,84px)",
+              lineHeight:1,margin:"0 0 8px",color:profile.col,letterSpacing:2}}>
+              {profile.type}
+            </h2>
+            <p style={{color:C.muted,fontSize:14,margin:0}}>{profile.desc}</p>
+          </div>
+
+          {/* Stats card */}
+          <div style={{...card,marginBottom:18,animation:"fadeUp 0.4s ease"}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14,textAlign:"center",marginBottom:18}}>
+              {[
+                {label:"Lowest",    val:profile.loNote, sub:`${profile.loFreq} Hz`},
+                {label:"Octave Span",val:profile.octaves,sub:"octaves",big:true},
+                {label:"Highest",   val:profile.hiNote, sub:`${profile.hiFreq} Hz`},
+              ].map(({label,val,sub,big})=>(
+                <div key={label}>
+                  <div style={{fontSize:10,letterSpacing:3,color:C.muted,textTransform:"uppercase",marginBottom:5}}>
+                    {label}
+                  </div>
+                  <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:big?52:28,lineHeight:1,
+                    color:big?C.accent:C.text}}>{val}</div>
+                  <div style={{fontSize:11,color:C.muted,marginTop:3}}>{sub}</div>
+                </div>
+              ))}
+            </div>
+            {/* Range bar */}
+            <div style={{position:"relative",height:9,background:C.dim,borderRadius:5,overflow:"hidden",marginBottom:7}}>
+              <div style={{position:"absolute",top:0,bottom:0,left:"4%",right:"4%",
+                background:`linear-gradient(90deg,#3b82f6,${profile.col},#ec4899)`,borderRadius:5}}/>
+              <div style={{position:"absolute",top:0,bottom:0,width:3,background:"#fff",
+                borderRadius:2,left:`${pct}%`}}/>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.muted}}>
+              <span>{profile.loNote}</span>
+              <span>▲ natural: {profile.avgNote}</span>
+              <span>{profile.hiNote}</span>
+            </div>
+          </div>
+
+          {/* Gemini Insight */}
+          {aiData?.insight&&(
+            <div style={{...card,marginBottom:18,borderLeft:`3px solid ${C.accent}`,animation:"fadeUp 0.5s ease"}}>
+              <div style={{fontSize:10,letterSpacing:4,color:C.accent,marginBottom:9,textTransform:"uppercase"}}>
+                ✦ Gemini Insight
+              </div>
+              <p style={{color:C.text,fontSize:14,lineHeight:1.8,margin:0}}>{aiData.insight}</p>
+            </div>
+          )}
+
+          {/* Singer Matches */}
+          {aiData?.singers?.length>0&&(
+            <section style={{marginBottom:22,animation:"fadeUp 0.6s ease"}}>
+              <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:11,textTransform:"uppercase"}}>
+                Your Voice Sounds Like
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {aiData.singers.map((s,i)=>(
+                  <a key={i} href={spotifyUrl(s.name)} target="_blank" rel="noopener noreferrer"
+                    className="hov-card"
+                    style={{textDecoration:"none",display:"flex",alignItems:"center",gap:14,
+                      ...card,padding:"13px 16px",transition:"border-color 0.15s"}}>
+                    <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:28,lineHeight:1,
+                      minWidth:34,textAlign:"center",
+                      color:i===0?C.accent:"#2a2a40"}}>
+                      {String(i+1).padStart(2,"0")}
+                    </div>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:600,fontSize:15,color:C.text,marginBottom:3}}>{s.name}</div>
+                      <div style={{fontSize:12,color:C.muted,lineHeight:1.5}}>{s.why}</div>
+                    </div>
+                    <SpotifyIcon size={18}/>
+                  </a>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Song Recommendations */}
+          {aiData?.songs?.length>0&&(
+            <section style={{marginBottom:22,animation:"fadeUp 0.7s ease"}}>
+              <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:11,textTransform:"uppercase"}}>
+                Songs Perfect For Your Voice
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {aiData.songs.map((s,i)=>(
+                  <a key={i} href={spotifyUrl(`${s.title} ${s.artist}`)} target="_blank" rel="noopener noreferrer"
+                    className="hov-card"
+                    style={{textDecoration:"none",display:"flex",alignItems:"center",gap:12,
+                      ...card,padding:"11px 15px",transition:"border-color 0.15s"}}>
+                    <div style={{width:36,height:36,borderRadius:8,background:C.dim,flexShrink:0,
+                      display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="#1db954">
+                        <path d="M9 3v10.55c-.59-.34-1.27-.55-2-.55C4.79 13 3 14.79 3 17s1.79 4 4 4 4-1.79 4-4V7h4V3H9z"/>
+                      </svg>
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontWeight:600,fontSize:14,color:C.text,
+                        whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.title}</div>
+                      <div style={{fontSize:12,color:C.muted}}>
+                        {s.artist}
+                        {s.why&&<span style={{color:"#3a3a58",fontStyle:"italic"}}> · {s.why}</span>}
+                      </div>
+                    </div>
+                    <SpotifyIcon size={16}/>
+                  </a>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Vocal Tip */}
+          {aiData?.tip&&(
+            <div style={{background:`${C.accent}10`,borderRadius:14,padding:18,marginBottom:22,
+              border:`1px solid ${C.accent}22`,animation:"fadeUp 0.8s ease"}}>
+              <div style={{fontSize:10,letterSpacing:4,color:C.accent,marginBottom:7,textTransform:"uppercase"}}>
+                💡 Vocal Coach Tip
+              </div>
+              <p style={{color:C.text,fontSize:14,lineHeight:1.8,margin:0}}>{aiData.tip}</p>
+            </div>
+          )}
+
+          {/* Error state */}
+          {aiErr&&(
+            <div style={{background:"#ff222215",borderRadius:12,padding:14,marginBottom:20,
+              fontSize:13,color:"#ff9090",border:"1px solid #ff222228",lineHeight:1.6}}>
+              ⚠️ {aiErr}
+            </div>
+          )}
+
+          <button onClick={reset}
+            style={{width:"100%",padding:"16px",borderRadius:12,background:"transparent",
+              color:C.text,border:`1.5px solid ${C.border}`,fontFamily:'"Bebas Neue",sans-serif',
+              fontSize:18,letterSpacing:3,cursor:"pointer",transition:"border-color 0.15s"}}
+            onMouseEnter={e=>e.currentTarget.style.borderColor=C.accent}
+            onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}>
+            ANALYZE AGAIN
+          </button>
+          <p style={{textAlign:"center",fontSize:11,color:C.muted,marginTop:10}}>
+            Powered by Gemini 2.0 Flash · Spotify links open in new tab
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }
