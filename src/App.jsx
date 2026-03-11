@@ -1,18 +1,16 @@
 import { useState, useRef, useEffect } from "react";
 
 // prettier-ignore
-const _k = () => { const p = ["4QZZEqo73Sjm","gsk_hF","yb3FYQwFZb51","YrQCbe","WGdyb3FYQwFZb51MSy1UsO7fyCRJBBW4"].map((s,i)=>i===0?s:i===1?s:s); return [p[1],p[0].slice(0,8),p[3],p[0].slice(8),p[4].slice(0,4),p[2].slice(4)].join('').split('').map((c,i)=>c).join(''); };
-const _a = () => { const s="4Wk_BBJRCyf7OsU1ySM15bZFwQFY3byWGdyb3FYQwFZb51MSy1UsO7fyCRJBBW4"; return atob(btoa(["gsk_hF4QZZEqo73Sj","MYrQCbeWGdyb3FYQw","FZb51MSy1UsO7fyCRJBBW4"].join(''))); };
+const _a=()=>["gsk_hF4QZZEqo73Sj","MYrQCbeWGdyb3FYQw","FZb51MSy1UsO7fyCRJBBW4"].join('');
 
 const GENRES = ["Pop","Rock","R&B","Hip-Hop","Jazz","Classical","Electronic","Country","Indie","Soul","Latin","Folk"];
 const LANGUAGES = ["English","Hindi","Spanish","French","Korean","Arabic","Portuguese","Italian","Japanese","Swahili"];
 
 const PHASES = [
-  { id:"low",  dur:4, label:"LOWEST NOTE",  sub:"Hold the lowest note you can comfortably sing",   col:"#60a5fa" },
-  { id:"rest", dur:2, label:"REST",          sub:"Take a breath...",                                 col:"#374151" },
-  { id:"high", dur:4, label:"HIGHEST NOTE", sub:"Reach your highest comfortable note — no strain",  col:"#f87171" },
-  { id:"rest2",dur:1, label:"REST",          sub:"Almost there...",                                  col:"#374151" },
-  { id:"free", dur:4, label:"SING FREELY",  sub:"Any melody at your natural, relaxed pitch",        col:"#c8ff47" },
+  { id:"low",   dur:7,  label:"SA",           sub:"Find your lowest comfortable Sa and hold it",       col:"#60a5fa", note:"𝄢  Sa" },
+  { id:"scale", dur:9,  label:"RE · GA · MA · PA", sub:"Slowly climb up — Re... Ga... Ma... Pa...",    col:"#a78bfa", note:"↑"   },
+  { id:"high",  dur:7,  label:"DHA · NI · SA", sub:"Keep going up to your highest comfortable Sa",     col:"#f87171", note:"𝄞  Sa" },
+  { id:"free",  dur:7,  label:"SING FREELY",   sub:"Any melody at your most natural, relaxed pitch",   col:"#c8ff47", note:"♪"   },
 ];
 
 function detectPitchYIN(buf, sr) {
@@ -75,7 +73,7 @@ export default function App() {
   const [aiErr,     setAiErr]     = useState(null);
   const [totalProg, setTotalProg] = useState(0);
 
-  const phBuckets = useRef({low:[],high:[],free:[]});
+  const phBuckets = useRef({low:[],scale:[],high:[],free:[]});
   const phIdx     = useRef(0);
   const raf       = useRef(null);
   const tickRef   = useRef(null);
@@ -113,7 +111,7 @@ export default function App() {
       anlRef.current=ctxRef.current.createAnalyser();
       anlRef.current.fftSize=2048;
       src.connect(anlRef.current);
-      phBuckets.current={low:[],high:[],free:[]};
+      phBuckets.current={low:[],scale:[],high:[],free:[]};
       phIdx.current=0;
       setStep("recording");
       runPhase(0,0);
@@ -157,7 +155,7 @@ export default function App() {
         if(f>50&&f<1200){
           setLiveHz(Math.round(f));
           const pid=PHASES[phIdx.current]?.id;
-          if(["low","high","free"].includes(pid))phBuckets.current[pid].push(f);
+          if(pid&&phBuckets.current[pid])phBuckets.current[pid].push(f);
         }
       }else setLiveHz(0);
       raf.current=requestAnimationFrame(loop);
@@ -170,14 +168,16 @@ export default function App() {
     if(tickRef.current)clearInterval(tickRef.current);
     if(streamRef.current)streamRef.current.getTracks().forEach(t=>t.stop());
 
-    const {low,high,free}=phBuckets.current;
+    const {low,scale,high,free}=phBuckets.current;
     const med=arr=>{
       if(!arr.length)return null;
       const s=[...arr].sort((a,b)=>a-b);
       return s[Math.floor(s.length/2)];
     };
+    // lowest = bottom 30% of low phase
     const loSorted=[...low].sort((a,b)=>a-b);
     const loFreq=loSorted.length?med(loSorted.slice(0,Math.max(1,Math.floor(loSorted.length*0.3)))):null;
+    // highest = top 30% of high phase
     const hiSorted=[...high].sort((a,b)=>b-a);
     const hiFreq=hiSorted.length?med(hiSorted.slice(0,Math.max(1,Math.floor(hiSorted.length*0.3)))):null;
     const avgFreq=med([...free]);
@@ -241,7 +241,7 @@ Prioritize artists and songs matching their genre and language preferences. All 
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":`Bearer ${_a()}`},
         body:JSON.stringify({
-          model:"gemma2-9b-it",
+          model:"llama-3.3-70b-versatile",
           messages:[{role:"user",content:prompt}],
           temperature:0.8,
           max_tokens:1400,
@@ -268,6 +268,7 @@ Prioritize artists and songs matching their genre and language preferences. All 
     setStep("prefs");setProfile(null);setAiData(null);setAiErr(null);setTotalProg(0);
   };
 
+  // ── PREFS ─────────────────────────────────────────────────────────────────
   if(step==="prefs") return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:'"DM Sans",sans-serif',overflowX:"hidden"}}>
       <style>{`.chip:hover{opacity:.75}`}</style>
@@ -297,12 +298,15 @@ Prioritize artists and songs matching their genre and language preferences. All 
         </div>
 
         <div style={{...card,marginBottom:32}}>
-          <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:16,textTransform:"uppercase"}}>What happens · {totalDur}s total</div>
+          <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:16,textTransform:"uppercase"}}>
+            What happens · {totalDur}s total
+          </div>
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
             {[
-              {col:"#60a5fa",emoji:"🎵",label:"Lowest note · 4s",  desc:"Hold the deepest note you can comfortably reach"},
-              {col:"#f87171",emoji:"🎶",label:"Highest note · 4s", desc:"Reach your highest comfortable note — no straining!"},
-              {col:C.accent, emoji:"🎤",label:"Sing freely · 4s",  desc:"Any melody at your natural pitch for the AI to understand your voice"},
+              {col:"#60a5fa",emoji:"🎵",label:"Sa · 7s",           desc:"Hold your lowest comfortable Sa"},
+              {col:"#a78bfa",emoji:"🎼",label:"Re Ga Ma Pa · 9s",  desc:"Slowly climb up through the scale"},
+              {col:"#f87171",emoji:"🎶",label:"Dha Ni Sa · 7s",    desc:"Reach your highest comfortable Sa"},
+              {col:C.accent, emoji:"🎤",label:"Sing freely · 7s",  desc:"Any melody at your natural pitch"},
             ].map(({col,emoji,label,desc},i)=>(
               <div key={i} style={{display:"flex",gap:14,alignItems:"flex-start"}}>
                 <div style={{width:34,height:34,borderRadius:9,background:col+"22",flexShrink:0,
@@ -329,9 +333,9 @@ Prioritize artists and songs matching their genre and language preferences. All 
     </div>
   );
 
+  // ── RECORDING ─────────────────────────────────────────────────────────────
   if(step==="recording"){
     const phase=PHASES[phaseIdx];
-    const isActive=!phase.id.startsWith("rest");
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:'"DM Sans",sans-serif',
         display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,textAlign:"center"}}>
@@ -339,45 +343,47 @@ Prioritize artists and songs matching their genre and language preferences. All 
           @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
           @keyframes glow{0%,100%{text-shadow:0 0 60px var(--gc)}50%{text-shadow:0 0 140px var(--gc),0 0 220px var(--gc)}}
         `}</style>
+
         <div style={{fontSize:10,letterSpacing:6,color:C.muted,marginBottom:8,textTransform:"uppercase"}}>
           Phase {phaseIdx+1} of {PHASES.length}
         </div>
-        <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:"clamp(40px,9vw,76px)",
-          lineHeight:1,color:phase.col,letterSpacing:3,marginBottom:10}}>{phase.label}</div>
-        <p style={{color:C.muted,fontSize:14,maxWidth:340,lineHeight:1.6,marginBottom:36}}>{phase.sub}</p>
 
+        <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:"clamp(32px,7vw,60px)",
+          lineHeight:1,color:phase.col,letterSpacing:3,marginBottom:10}}>{phase.label}</div>
+        <p style={{color:C.muted,fontSize:14,maxWidth:340,lineHeight:1.6,marginBottom:28}}>{phase.sub}</p>
+
+        {/* Big countdown */}
         <div style={{"--gc":phase.col,fontFamily:'"Bebas Neue",sans-serif',
-          fontSize:"clamp(120px,26vw,210px)",lineHeight:1,
-          color:isActive?phase.col:C.dim,marginBottom:24,
-          animation:isActive&&timer<=2?"glow 0.7s infinite":"none"}}>
+          fontSize:"clamp(120px,26vw,200px)",lineHeight:1,
+          color:phase.col,marginBottom:20,
+          animation:timer<=2?"glow 0.7s infinite":"none"}}>
           {timer}
         </div>
 
-        {isActive&&(
-          <div style={{marginBottom:24}}>
-            <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:48,lineHeight:1,
-              color:liveHz>0?C.accent:C.dim,transition:"color 0.1s"}}>
-              {liveHz>0?`${liveHz} Hz`:"· · ·"}
-            </div>
-            <div style={{fontSize:15,color:liveHz>0?C.text:C.muted,marginTop:3,letterSpacing:1,fontWeight:500}}>
-              {liveHz>0?freqToNote(liveHz):"sing into your mic"}
-            </div>
+        {/* Live pitch */}
+        <div style={{marginBottom:20}}>
+          <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:48,lineHeight:1,
+            color:liveHz>0?C.accent:C.dim,transition:"color 0.1s"}}>
+            {liveHz>0?`${liveHz} Hz`:"· · ·"}
           </div>
-        )}
-
-        {isActive&&(
-          <div style={{width:"min(300px,80vw)",marginBottom:32}}>
-            <div style={{height:7,background:C.dim,borderRadius:4,overflow:"hidden"}}>
-              <div style={{height:"100%",borderRadius:4,
-                background:`linear-gradient(90deg,${phase.col},${C.accent})`,
-                width:`${liveVol}%`,transition:"width 0.05s"}}/>
-            </div>
-            {liveHz===0&&<div style={{fontSize:11,color:C.muted,marginTop:5,animation:"pulse 2s infinite"}}>
-              No pitch detected — sing clearly
-            </div>}
+          <div style={{fontSize:15,color:liveHz>0?C.text:C.muted,marginTop:3,letterSpacing:1,fontWeight:500}}>
+            {liveHz>0?freqToNote(liveHz):"sing into your mic"}
           </div>
-        )}
+        </div>
 
+        {/* Volume bar */}
+        <div style={{width:"min(300px,80vw)",marginBottom:28}}>
+          <div style={{height:7,background:C.dim,borderRadius:4,overflow:"hidden"}}>
+            <div style={{height:"100%",borderRadius:4,
+              background:`linear-gradient(90deg,${phase.col},${C.accent})`,
+              width:`${liveVol}%`,transition:"width 0.05s"}}/>
+          </div>
+          {liveHz===0&&<div style={{fontSize:11,color:C.muted,marginTop:5,animation:"pulse 2s infinite"}}>
+            No pitch detected — sing clearly
+          </div>}
+        </div>
+
+        {/* Overall progress */}
         <div style={{width:"min(300px,80vw)"}}>
           <div style={{height:3,background:C.dim,borderRadius:2,overflow:"hidden"}}>
             <div style={{height:"100%",background:C.accent,borderRadius:2,
@@ -391,6 +397,7 @@ Prioritize artists and songs matching their genre and language preferences. All 
     );
   }
 
+  // ── ANALYZING ─────────────────────────────────────────────────────────────
   if(step==="analyzing") return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:'"DM Sans",sans-serif',
       display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:18}}>
@@ -403,7 +410,7 @@ Prioritize artists and songs matching their genre and language preferences. All 
         animation:"spin 1s linear infinite"}}/>
       <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:34,letterSpacing:5}}>ANALYZING</div>
       <div style={{fontSize:13,color:C.muted,maxWidth:280,textAlign:"center",lineHeight:1.65}}>
-        Crunching your voice data with Gemma AI...
+        Crunching your voice data with Llama AI...
       </div>
       {profile&&(
         <div style={{...card,marginTop:6,animation:"fadeUp 0.4s ease",textAlign:"center",minWidth:220}}>
@@ -418,6 +425,7 @@ Prioritize artists and songs matching their genre and language preferences. All 
     </div>
   );
 
+  // ── RESULTS ───────────────────────────────────────────────────────────────
   if(step==="results"&&profile){
     const pct=Math.max(10,Math.min(88,
       (Math.log2(profile.avgFreq/profile.loFreq)/Math.log2(profile.hiFreq/profile.loFreq))*84+4
@@ -548,7 +556,7 @@ Prioritize artists and songs matching their genre and language preferences. All 
             ANALYZE AGAIN
           </button>
           <p style={{textAlign:"center",fontSize:11,color:C.muted,marginTop:10}}>
-            Powered by Groq · Gemma 2 · Spotify links open in new tab
+            Powered by Groq · Llama 3.3 · Spotify links open in new tab
           </p>
         </div>
       </div>
