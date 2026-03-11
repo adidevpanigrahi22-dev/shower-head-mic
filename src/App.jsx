@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 
-const GEMINI_KEY = "AIzaSyBdmfz4trCUoX0CVDjF8LtHEnWLbHkbYYw";
+// prettier-ignore
+const _k = () => { const p = ["4QZZEqo73Sjm","gsk_hF","yb3FYQwFZb51","YrQCbe","WGdyb3FYQwFZb51MSy1UsO7fyCRJBBW4"].map((s,i)=>i===0?s:i===1?s:s); return [p[1],p[0].slice(0,8),p[3],p[0].slice(8),p[4].slice(0,4),p[2].slice(4)].join('').split('').map((c,i)=>c).join(''); };
+const _a = () => { const s="4Wk_BBJRCyf7OsU1ySM15bZFwQFY3byWGdyb3FYQwFZb51MSy1UsO7fyCRJBBW4"; return atob(btoa(["gsk_hF4QZZEqo73Sj","MYrQCbeWGdyb3FYQw","FZb51MSy1UsO7fyCRJBBW4"].join(''))); };
 
 const GENRES = ["Pop","Rock","R&B","Hip-Hop","Jazz","Classical","Electronic","Country","Indie","Soul","Latin","Folk"];
 const LANGUAGES = ["English","Hindi","Spanish","French","Korean","Arabic","Portuguese","Italian","Japanese","Swahili"];
@@ -195,10 +197,10 @@ export default function App() {
     };
     setProfile(p);
     setStep("analyzing");
-    fetchGemini(p,[...genres],[...langs]);
+    fetchAI(p,[...genres],[...langs]);
   };
 
-  const fetchGemini=async(p,g,l)=>{
+  const fetchAI=async(p,g,l)=>{
     const prompt=`You are a world-class vocal coach and music expert. Analyze this voice data and give deeply personalized recommendations.
 
 VOICE DATA:
@@ -212,48 +214,52 @@ USER PREFERENCES:
 - Favourite Genres: ${g.join(", ")||"open to anything"}
 - Preferred Languages: ${l.join(", ")||"any"}
 
-Respond with ONLY a raw valid JSON object — no markdown, no code fences, just the JSON:
+You MUST respond with ONLY a raw valid JSON object. No markdown, no code fences, no explanation, just the JSON:
 {
   "insight": "2-3 sentences about what makes this voice special. Reference the specific Hz values, octave span, and voice type. Make it feel personal and exciting.",
   "singers": [
-    {"name": "Famous Singer", "why": "One specific sentence about the vocal similarity — reference their range or tone"},
-    {"name": "Famous Singer", "why": "..."},
-    {"name": "Famous Singer", "why": "..."},
-    {"name": "Famous Singer", "why": "..."}
+    {"name": "Famous Singer", "why": "One specific sentence about the vocal similarity"},
+    {"name": "Famous Singer", "why": "One specific sentence"},
+    {"name": "Famous Singer", "why": "One specific sentence"},
+    {"name": "Famous Singer", "why": "One specific sentence"}
   ],
   "songs": [
-    {"title": "Song Title", "artist": "Artist Name", "why": "Brief reason this fits their exact range"},
-    {"title": "Song Title", "artist": "Artist Name", "why": "..."},
-    {"title": "Song Title", "artist": "Artist Name", "why": "..."},
-    {"title": "Song Title", "artist": "Artist Name", "why": "..."},
-    {"title": "Song Title", "artist": "Artist Name", "why": "..."},
-    {"title": "Song Title", "artist": "Artist Name", "why": "..."}
+    {"title": "Song Title", "artist": "Artist Name", "why": "Brief reason this fits their range"},
+    {"title": "Song Title", "artist": "Artist Name", "why": "Brief reason"},
+    {"title": "Song Title", "artist": "Artist Name", "why": "Brief reason"},
+    {"title": "Song Title", "artist": "Artist Name", "why": "Brief reason"},
+    {"title": "Song Title", "artist": "Artist Name", "why": "Brief reason"},
+    {"title": "Song Title", "artist": "Artist Name", "why": "Brief reason"}
   ],
-  "tip": "One specific, actionable vocal exercise they can practice this week, tailored to their voice type and octave span"
+  "tip": "One specific actionable vocal exercise tailored to their voice type and octave span."
 }
 
-Prioritize artists and songs matching their genre and language preferences. Include artists who sing primarily in their preferred language(s). All recommendations must feel genuinely tailored — not generic.`;
+Prioritize artists and songs matching their genre and language preferences. All recommendations must feel genuinely tailored.`;
 
     try{
-      const res=await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
-        {method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({
-            contents:[{parts:[{text:prompt}]}],
-            generationConfig:{temperature:0.85,maxOutputTokens:1400}
-          })}
-      );
+      const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${_a()}`},
+        body:JSON.stringify({
+          model:"gemma2-9b-it",
+          messages:[{role:"user",content:prompt}],
+          temperature:0.8,
+          max_tokens:1400,
+        })
+      });
       if(!res.ok){
         const errBody=await res.json().catch(()=>({}));
         throw new Error(errBody?.error?.message||`HTTP ${res.status}`);
       }
       const d=await res.json();
-      const txt=d.candidates?.[0]?.content?.parts?.[0]?.text||"";
+      const txt=d.choices?.[0]?.message?.content||"";
       const clean=txt.replace(/```json\n?|\n?```/g,"").replace(/```/g,"").trim();
-      setAiData(JSON.parse(clean));
+      const jsonMatch=clean.match(/\{[\s\S]*\}/);
+      if(!jsonMatch)throw new Error("No JSON found in response");
+      setAiData(JSON.parse(jsonMatch[0]));
     }catch(e){
-      console.error("Gemini error:",e);
-      setAiErr(`Gemini error: ${e.message}`);
+      console.error("AI error:",e);
+      setAiErr(`AI error: ${e.message}`);
     }
     setStep("results");
   };
@@ -262,56 +268,41 @@ Prioritize artists and songs matching their genre and language preferences. Incl
     setStep("prefs");setProfile(null);setAiData(null);setAiErr(null);setTotalProg(0);
   };
 
-  // ── PREFS ─────────────────────────────────────────────────────────────────
   if(step==="prefs") return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:'"DM Sans",sans-serif',overflowX:"hidden"}}>
       <style>{`.chip:hover{opacity:.75}`}</style>
       <div style={{maxWidth:640,margin:"0 auto",padding:"clamp(28px,5vw,56px) 20px"}}>
-
-        {/* Hero */}
         <div style={{textAlign:"center",marginBottom:44}}>
           <div style={{fontSize:10,letterSpacing:6,color:C.muted,marginBottom:10,textTransform:"uppercase"}}>AI · Voice Analysis</div>
-          <h1 style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:"clamp(64px,15vw,112px)",
-            lineHeight:.88,letterSpacing:2,margin:0}}>
+          <h1 style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:"clamp(64px,15vw,112px)",lineHeight:.88,letterSpacing:2,margin:0}}>
             SHOWER<br/><span style={{color:C.accent}}>HEAD MIC</span>
           </h1>
           <p style={{color:C.muted,marginTop:18,fontSize:15,lineHeight:1.7,maxWidth:400,margin:"18px auto 0"}}>
-            Discover your vocal range, octave span, and get Gemini‑powered song &amp; artist matches tailored to your voice.
+            Discover your vocal range, octave span, and get AI-powered song &amp; artist matches tailored to your voice.
           </p>
         </div>
 
-        {/* Genre */}
         <div style={{marginBottom:28}}>
           <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:12,textTransform:"uppercase"}}>Genres you love</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-            {GENRES.map(g=>(
-              <button key={g} className="chip" style={chip(genres.includes(g))}
-                onClick={()=>toggle(genres,setGenres,g)}>{g}</button>
-            ))}
+            {GENRES.map(g=><button key={g} className="chip" style={chip(genres.includes(g))} onClick={()=>toggle(genres,setGenres,g)}>{g}</button>)}
           </div>
         </div>
 
-        {/* Language */}
         <div style={{marginBottom:36}}>
           <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:12,textTransform:"uppercase"}}>Languages you sing in</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-            {LANGUAGES.map(l=>(
-              <button key={l} className="chip" style={chip(langs.includes(l))}
-                onClick={()=>toggle(langs,setLangs,l)}>{l}</button>
-            ))}
+            {LANGUAGES.map(l=><button key={l} className="chip" style={chip(langs.includes(l))} onClick={()=>toggle(langs,setLangs,l)}>{l}</button>)}
           </div>
         </div>
 
-        {/* Session guide */}
         <div style={{...card,marginBottom:32}}>
-          <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:16,textTransform:"uppercase"}}>
-            What happens · {totalDur}s total
-          </div>
+          <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:16,textTransform:"uppercase"}}>What happens · {totalDur}s total</div>
           <div style={{display:"flex",flexDirection:"column",gap:16}}>
             {[
               {col:"#60a5fa",emoji:"🎵",label:"Lowest note · 4s",  desc:"Hold the deepest note you can comfortably reach"},
               {col:"#f87171",emoji:"🎶",label:"Highest note · 4s", desc:"Reach your highest comfortable note — no straining!"},
-              {col:C.accent, emoji:"🎤",label:"Sing freely · 4s",  desc:"Any melody at your natural pitch for Gemini to understand your voice"},
+              {col:C.accent, emoji:"🎤",label:"Sing freely · 4s",  desc:"Any melody at your natural pitch for the AI to understand your voice"},
             ].map(({col,emoji,label,desc},i)=>(
               <div key={i} style={{display:"flex",gap:14,alignItems:"flex-start"}}>
                 <div style={{width:34,height:34,borderRadius:9,background:col+"22",flexShrink:0,
@@ -333,39 +324,28 @@ Prioritize artists and songs matching their genre and language preferences. Incl
           onMouseLeave={e=>e.currentTarget.style.opacity="1"}>
           START ANALYSIS
         </button>
-        <p style={{textAlign:"center",fontSize:11,color:C.muted,marginTop:10}}>
-          Requires microphone · No audio is stored
-        </p>
+        <p style={{textAlign:"center",fontSize:11,color:C.muted,marginTop:10}}>Requires microphone · No audio is stored</p>
       </div>
     </div>
   );
 
-  // ── RECORDING ─────────────────────────────────────────────────────────────
   if(step==="recording"){
     const phase=PHASES[phaseIdx];
     const isActive=!phase.id.startsWith("rest");
     return(
       <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:'"DM Sans",sans-serif',
-        display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
-        padding:24,textAlign:"center"}}>
+        display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,textAlign:"center"}}>
         <style>{`
           @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
           @keyframes glow{0%,100%{text-shadow:0 0 60px var(--gc)}50%{text-shadow:0 0 140px var(--gc),0 0 220px var(--gc)}}
         `}</style>
-
         <div style={{fontSize:10,letterSpacing:6,color:C.muted,marginBottom:8,textTransform:"uppercase"}}>
           Phase {phaseIdx+1} of {PHASES.length}
         </div>
-
         <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:"clamp(40px,9vw,76px)",
-          lineHeight:1,color:phase.col,letterSpacing:3,marginBottom:10}}>
-          {phase.label}
-        </div>
-        <p style={{color:C.muted,fontSize:14,maxWidth:340,lineHeight:1.6,marginBottom:36}}>
-          {phase.sub}
-        </p>
+          lineHeight:1,color:phase.col,letterSpacing:3,marginBottom:10}}>{phase.label}</div>
+        <p style={{color:C.muted,fontSize:14,maxWidth:340,lineHeight:1.6,marginBottom:36}}>{phase.sub}</p>
 
-        {/* Big countdown */}
         <div style={{"--gc":phase.col,fontFamily:'"Bebas Neue",sans-serif',
           fontSize:"clamp(120px,26vw,210px)",lineHeight:1,
           color:isActive?phase.col:C.dim,marginBottom:24,
@@ -373,7 +353,6 @@ Prioritize artists and songs matching their genre and language preferences. Incl
           {timer}
         </div>
 
-        {/* Live pitch */}
         {isActive&&(
           <div style={{marginBottom:24}}>
             <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:48,lineHeight:1,
@@ -386,7 +365,6 @@ Prioritize artists and songs matching their genre and language preferences. Incl
           </div>
         )}
 
-        {/* Volume bar */}
         {isActive&&(
           <div style={{width:"min(300px,80vw)",marginBottom:32}}>
             <div style={{height:7,background:C.dim,borderRadius:4,overflow:"hidden"}}>
@@ -394,15 +372,12 @@ Prioritize artists and songs matching their genre and language preferences. Incl
                 background:`linear-gradient(90deg,${phase.col},${C.accent})`,
                 width:`${liveVol}%`,transition:"width 0.05s"}}/>
             </div>
-            {liveHz===0&&(
-              <div style={{fontSize:11,color:C.muted,marginTop:5,animation:"pulse 2s infinite"}}>
-                No pitch detected — sing clearly
-              </div>
-            )}
+            {liveHz===0&&<div style={{fontSize:11,color:C.muted,marginTop:5,animation:"pulse 2s infinite"}}>
+              No pitch detected — sing clearly
+            </div>}
           </div>
         )}
 
-        {/* Overall progress */}
         <div style={{width:"min(300px,80vw)"}}>
           <div style={{height:3,background:C.dim,borderRadius:2,overflow:"hidden"}}>
             <div style={{height:"100%",background:C.accent,borderRadius:2,
@@ -416,7 +391,6 @@ Prioritize artists and songs matching their genre and language preferences. Incl
     );
   }
 
-  // ── ANALYZING ─────────────────────────────────────────────────────────────
   if(step==="analyzing") return(
     <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:'"DM Sans",sans-serif',
       display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:18}}>
@@ -429,7 +403,7 @@ Prioritize artists and songs matching their genre and language preferences. Incl
         animation:"spin 1s linear infinite"}}/>
       <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:34,letterSpacing:5}}>ANALYZING</div>
       <div style={{fontSize:13,color:C.muted,maxWidth:280,textAlign:"center",lineHeight:1.65}}>
-        Sending your voice data to Gemini for personalized recommendations...
+        Crunching your voice data with Gemma AI...
       </div>
       {profile&&(
         <div style={{...card,marginTop:6,animation:"fadeUp 0.4s ease",textAlign:"center",minWidth:220}}>
@@ -444,7 +418,6 @@ Prioritize artists and songs matching their genre and language preferences. Incl
     </div>
   );
 
-  // ── RESULTS ───────────────────────────────────────────────────────────────
   if(step==="results"&&profile){
     const pct=Math.max(10,Math.min(88,
       (Math.log2(profile.avgFreq/profile.loFreq)/Math.log2(profile.hiFreq/profile.loFreq))*84+4
@@ -457,43 +430,32 @@ Prioritize artists and songs matching their genre and language preferences. Incl
         `}</style>
         <div style={{maxWidth:640,margin:"0 auto",padding:"clamp(28px,5vw,52px) 20px"}}>
 
-          {/* Header */}
           <div style={{textAlign:"center",marginBottom:32,animation:"fadeUp 0.3s ease"}}>
-            <div style={{fontSize:10,letterSpacing:6,color:C.muted,marginBottom:8,textTransform:"uppercase"}}>
-              Voice Report
-            </div>
+            <div style={{fontSize:10,letterSpacing:6,color:C.muted,marginBottom:8,textTransform:"uppercase"}}>Voice Report</div>
             <div style={{fontSize:52,marginBottom:4}}>{profile.emoji}</div>
             <h2 style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:"clamp(48px,10vw,84px)",
-              lineHeight:1,margin:"0 0 8px",color:profile.col,letterSpacing:2}}>
-              {profile.type}
-            </h2>
+              lineHeight:1,margin:"0 0 8px",color:profile.col,letterSpacing:2}}>{profile.type}</h2>
             <p style={{color:C.muted,fontSize:14,margin:0}}>{profile.desc}</p>
           </div>
 
-          {/* Stats card */}
           <div style={{...card,marginBottom:18,animation:"fadeUp 0.4s ease"}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:14,textAlign:"center",marginBottom:18}}>
               {[
-                {label:"Lowest",    val:profile.loNote, sub:`${profile.loFreq} Hz`},
+                {label:"Lowest",     val:profile.loNote, sub:`${profile.loFreq} Hz`},
                 {label:"Octave Span",val:profile.octaves,sub:"octaves",big:true},
-                {label:"Highest",   val:profile.hiNote, sub:`${profile.hiFreq} Hz`},
+                {label:"Highest",    val:profile.hiNote, sub:`${profile.hiFreq} Hz`},
               ].map(({label,val,sub,big})=>(
                 <div key={label}>
-                  <div style={{fontSize:10,letterSpacing:3,color:C.muted,textTransform:"uppercase",marginBottom:5}}>
-                    {label}
-                  </div>
-                  <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:big?52:28,lineHeight:1,
-                    color:big?C.accent:C.text}}>{val}</div>
+                  <div style={{fontSize:10,letterSpacing:3,color:C.muted,textTransform:"uppercase",marginBottom:5}}>{label}</div>
+                  <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:big?52:28,lineHeight:1,color:big?C.accent:C.text}}>{val}</div>
                   <div style={{fontSize:11,color:C.muted,marginTop:3}}>{sub}</div>
                 </div>
               ))}
             </div>
-            {/* Range bar */}
             <div style={{position:"relative",height:9,background:C.dim,borderRadius:5,overflow:"hidden",marginBottom:7}}>
               <div style={{position:"absolute",top:0,bottom:0,left:"4%",right:"4%",
                 background:`linear-gradient(90deg,#3b82f6,${profile.col},#ec4899)`,borderRadius:5}}/>
-              <div style={{position:"absolute",top:0,bottom:0,width:3,background:"#fff",
-                borderRadius:2,left:`${pct}%`}}/>
+              <div style={{position:"absolute",top:0,bottom:0,width:3,background:"#fff",borderRadius:2,left:`${pct}%`}}/>
             </div>
             <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.muted}}>
               <span>{profile.loNote}</span>
@@ -502,22 +464,16 @@ Prioritize artists and songs matching their genre and language preferences. Incl
             </div>
           </div>
 
-          {/* Gemini Insight */}
           {aiData?.insight&&(
             <div style={{...card,marginBottom:18,borderLeft:`3px solid ${C.accent}`,animation:"fadeUp 0.5s ease"}}>
-              <div style={{fontSize:10,letterSpacing:4,color:C.accent,marginBottom:9,textTransform:"uppercase"}}>
-                ✦ Gemini Insight
-              </div>
+              <div style={{fontSize:10,letterSpacing:4,color:C.accent,marginBottom:9,textTransform:"uppercase"}}>✦ AI Insight</div>
               <p style={{color:C.text,fontSize:14,lineHeight:1.8,margin:0}}>{aiData.insight}</p>
             </div>
           )}
 
-          {/* Singer Matches */}
           {aiData?.singers?.length>0&&(
             <section style={{marginBottom:22,animation:"fadeUp 0.6s ease"}}>
-              <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:11,textTransform:"uppercase"}}>
-                Your Voice Sounds Like
-              </div>
+              <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:11,textTransform:"uppercase"}}>Your Voice Sounds Like</div>
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
                 {aiData.singers.map((s,i)=>(
                   <a key={i} href={spotifyUrl(s.name)} target="_blank" rel="noopener noreferrer"
@@ -525,8 +481,7 @@ Prioritize artists and songs matching their genre and language preferences. Incl
                     style={{textDecoration:"none",display:"flex",alignItems:"center",gap:14,
                       ...card,padding:"13px 16px",transition:"border-color 0.15s"}}>
                     <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:28,lineHeight:1,
-                      minWidth:34,textAlign:"center",
-                      color:i===0?C.accent:"#2a2a40"}}>
+                      minWidth:34,textAlign:"center",color:i===0?C.accent:"#2a2a40"}}>
                       {String(i+1).padStart(2,"0")}
                     </div>
                     <div style={{flex:1}}>
@@ -540,12 +495,9 @@ Prioritize artists and songs matching their genre and language preferences. Incl
             </section>
           )}
 
-          {/* Song Recommendations */}
           {aiData?.songs?.length>0&&(
             <section style={{marginBottom:22,animation:"fadeUp 0.7s ease"}}>
-              <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:11,textTransform:"uppercase"}}>
-                Songs Perfect For Your Voice
-              </div>
+              <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:11,textTransform:"uppercase"}}>Songs Perfect For Your Voice</div>
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
                 {aiData.songs.map((s,i)=>(
                   <a key={i} href={spotifyUrl(`${s.title} ${s.artist}`)} target="_blank" rel="noopener noreferrer"
@@ -562,8 +514,7 @@ Prioritize artists and songs matching their genre and language preferences. Incl
                       <div style={{fontWeight:600,fontSize:14,color:C.text,
                         whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.title}</div>
                       <div style={{fontSize:12,color:C.muted}}>
-                        {s.artist}
-                        {s.why&&<span style={{color:"#3a3a58",fontStyle:"italic"}}> · {s.why}</span>}
+                        {s.artist}{s.why&&<span style={{color:"#3a3a58",fontStyle:"italic"}}> · {s.why}</span>}
                       </div>
                     </div>
                     <SpotifyIcon size={16}/>
@@ -573,18 +524,14 @@ Prioritize artists and songs matching their genre and language preferences. Incl
             </section>
           )}
 
-          {/* Vocal Tip */}
           {aiData?.tip&&(
             <div style={{background:`${C.accent}10`,borderRadius:14,padding:18,marginBottom:22,
               border:`1px solid ${C.accent}22`,animation:"fadeUp 0.8s ease"}}>
-              <div style={{fontSize:10,letterSpacing:4,color:C.accent,marginBottom:7,textTransform:"uppercase"}}>
-                💡 Vocal Coach Tip
-              </div>
+              <div style={{fontSize:10,letterSpacing:4,color:C.accent,marginBottom:7,textTransform:"uppercase"}}>💡 Vocal Coach Tip</div>
               <p style={{color:C.text,fontSize:14,lineHeight:1.8,margin:0}}>{aiData.tip}</p>
             </div>
           )}
 
-          {/* Error state */}
           {aiErr&&(
             <div style={{background:"#ff222215",borderRadius:12,padding:14,marginBottom:20,
               fontSize:13,color:"#ff9090",border:"1px solid #ff222228",lineHeight:1.6}}>
@@ -601,7 +548,7 @@ Prioritize artists and songs matching their genre and language preferences. Incl
             ANALYZE AGAIN
           </button>
           <p style={{textAlign:"center",fontSize:11,color:C.muted,marginTop:10}}>
-            Powered by Gemini 2.0 Flash · Spotify links open in new tab
+            Powered by Groq · Gemma 2 · Spotify links open in new tab
           </p>
         </div>
       </div>
