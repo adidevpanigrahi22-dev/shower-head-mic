@@ -7,10 +7,10 @@ const GENRES = ["Pop","Rock","R&B","Hip-Hop","Jazz","Classical","Electronic","Co
 const LANGUAGES = ["English","Hindi","Spanish","French","Korean","Arabic","Portuguese","Italian","Japanese","Swahili"];
 
 const PHASES = [
-  { id:"low",   dur:7,  label:"SA",               sub:"Find your lowest comfortable Sa and hold it",    col:"#60a5fa" },
-  { id:"scale", dur:9,  label:"RE · GA · MA · PA", sub:"Slowly climb up — Re... Ga... Ma... Pa...",     col:"#a78bfa" },
-  { id:"high",  dur:7,  label:"DHA · NI · SA",     sub:"Keep going up to your highest comfortable Sa",  col:"#f87171" },
-  { id:"free",  dur:7,  label:"SING FREELY",        sub:"Any melody at your most natural, relaxed pitch",col:"#c8ff47" },
+  { id:"low",   dur:7,  label:"SA",           sub:"Find your lowest comfortable Sa and hold it",       col:"#60a5fa", note:"𝄢  Sa" },
+  { id:"scale", dur:9,  label:"RE · GA · MA · PA", sub:"Slowly climb up — Re... Ga... Ma... Pa...",    col:"#a78bfa", note:"↑"   },
+  { id:"high",  dur:7,  label:"DHA · NI · SA", sub:"Keep going up to your highest comfortable Sa",     col:"#f87171", note:"𝄞  Sa" },
+  { id:"free",  dur:7,  label:"SING FREELY",   sub:"Any melody at your most natural, relaxed pitch",   col:"#c8ff47", note:"♪"   },
 ];
 
 function detectPitchYIN(buf, sr) {
@@ -38,24 +38,13 @@ function freqToNote(f){
   return n[midi%12]+(Math.floor(midi/12)-1);
 }
 
-function voiceType(f, gender){
-  if(gender==="male"){
-    if(f<130)return{type:"Bass",        emoji:"🎸",desc:"Deep, resonant and commanding",             col:"#3b82f6"};
-    if(f<180)return{type:"Baritone",    emoji:"🎻",desc:"Rich, warm — the most common male voice",   col:"#8b5cf6"};
-    return       {type:"Tenor",         emoji:"🎺",desc:"Bright and powerful high male voice",        col:"#06b6d4"};
-  }
-  if(gender==="female"){
-    if(f<260)return{type:"Contralto",   emoji:"🪗",desc:"Deep, warm and richly textured",             col:"#10b981"};
-    if(f<340)return{type:"Mezzo-Soprano",emoji:"🎶",desc:"Versatile middle voice, warm & full",       col:"#f59e0b"};
-    return       {type:"Soprano",       emoji:"✨",desc:"The highest voice — bright and soaring",     col:"#ec4899"};
-  }
-  // fallback auto
-  if(f<130)return{type:"Bass",          emoji:"🎸",desc:"Deep, resonant and commanding",              col:"#3b82f6"};
-  if(f<180)return{type:"Baritone",      emoji:"🎻",desc:"Rich, warm — the most common male voice",    col:"#8b5cf6"};
-  if(f<260)return{type:"Tenor",         emoji:"🎺",desc:"Bright and powerful high male voice",         col:"#06b6d4"};
-  if(f<340)return{type:"Contralto",     emoji:"🪗",desc:"Deep, warm and richly textured",              col:"#10b981"};
-  if(f<450)return{type:"Mezzo-Soprano", emoji:"🎶",desc:"Versatile middle female voice, warm & full", col:"#f59e0b"};
-  return         {type:"Soprano",       emoji:"✨",desc:"The highest voice — bright and soaring",      col:"#ec4899"};
+function voiceType(f){
+  if(f<130)return{type:"Bass",         emoji:"🎸",desc:"Deep, resonant and commanding",              col:"#3b82f6"};
+  if(f<180)return{type:"Baritone",     emoji:"🎻",desc:"Rich, warm — the most common male voice",    col:"#8b5cf6"};
+  if(f<260)return{type:"Tenor",        emoji:"🎺",desc:"Bright and powerful high male voice",         col:"#06b6d4"};
+  if(f<340)return{type:"Contralto",    emoji:"🪗",desc:"Deep, warm and richly textured",              col:"#10b981"};
+  if(f<450)return{type:"Mezzo-Soprano",emoji:"🎶",desc:"Versatile middle female voice, warm & full", col:"#f59e0b"};
+  return       {type:"Soprano",        emoji:"✨",desc:"The highest voice — bright and soaring",      col:"#ec4899"};
 }
 
 function calcOctaves(lo,hi){
@@ -73,7 +62,6 @@ const SpotifyIcon=({size=18})=>(
 
 export default function App() {
   const [step,      setStep]      = useState("prefs");
-  const [gender,    setGender]    = useState(null);
   const [genres,    setGenres]    = useState([]);
   const [langs,     setLangs]     = useState([]);
   const [phaseIdx,  setPhaseIdx]  = useState(0);
@@ -180,14 +168,16 @@ export default function App() {
     if(tickRef.current)clearInterval(tickRef.current);
     if(streamRef.current)streamRef.current.getTracks().forEach(t=>t.stop());
 
-    const {low,high,free}=phBuckets.current;
+    const {low,scale,high,free}=phBuckets.current;
     const med=arr=>{
       if(!arr.length)return null;
       const s=[...arr].sort((a,b)=>a-b);
       return s[Math.floor(s.length/2)];
     };
+    // lowest = bottom 30% of low phase
     const loSorted=[...low].sort((a,b)=>a-b);
     const loFreq=loSorted.length?med(loSorted.slice(0,Math.max(1,Math.floor(loSorted.length*0.3)))):null;
+    // highest = top 30% of high phase
     const hiSorted=[...high].sort((a,b)=>b-a);
     const hiFreq=hiSorted.length?med(hiSorted.slice(0,Math.max(1,Math.floor(hiSorted.length*0.3)))):null;
     const avgFreq=med([...free]);
@@ -199,11 +189,11 @@ export default function App() {
     const effLo=loFreq||(avgFreq*0.68);
     const effHi=hiFreq||(avgFreq*1.85);
     const effAvg=avgFreq||((effLo+effHi)/2);
-    const vt=voiceType(effAvg, gender);
+    const vt=voiceType(effAvg);
     const p={
       loFreq:Math.round(effLo),hiFreq:Math.round(effHi),avgFreq:Math.round(effAvg),
       loNote:freqToNote(effLo),hiNote:freqToNote(effHi),avgNote:freqToNote(effAvg),
-      octaves:calcOctaves(effLo,effHi),gender,...vt
+      octaves:calcOctaves(effLo,effHi),...vt
     };
     setProfile(p);
     setStep("analyzing");
@@ -214,7 +204,6 @@ export default function App() {
     const prompt=`You are a world-class vocal coach and music expert. Analyze this voice data and give deeply personalized recommendations.
 
 VOICE DATA:
-- Gender: ${p.gender||"not specified"}
 - Voice Type: ${p.type}
 - Natural Pitch: ${p.avgFreq}Hz (note: ${p.avgNote})
 - Lowest Note Detected: ${p.loNote} (${p.loFreq}Hz)
@@ -245,7 +234,7 @@ You MUST respond with ONLY a raw valid JSON object. No markdown, no code fences,
   "tip": "One specific actionable vocal exercise tailored to their voice type and octave span."
 }
 
-Prioritize artists and songs matching their genre and language preferences. Match singer recommendations to the user's gender. All recommendations must feel genuinely tailored.`;
+Prioritize artists and songs matching their genre and language preferences. All recommendations must feel genuinely tailored.`;
 
     try{
       const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{
@@ -276,7 +265,7 @@ Prioritize artists and songs matching their genre and language preferences. Matc
   };
 
   const reset=()=>{
-    setStep("prefs");setProfile(null);setAiData(null);setAiErr(null);setTotalProg(0);setGender(null);
+    setStep("prefs");setProfile(null);setAiData(null);setAiErr(null);setTotalProg(0);
   };
 
   // ── PREFS ─────────────────────────────────────────────────────────────────
@@ -294,27 +283,6 @@ Prioritize artists and songs matching their genre and language preferences. Matc
           </p>
         </div>
 
-        {/* Gender */}
-        <div style={{marginBottom:28}}>
-          <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:12,textTransform:"uppercase"}}>Your voice</div>
-          <div style={{display:"flex",gap:10}}>
-            {[{v:"male",label:"♂ Male"},{v:"female",label:"♀ Female"}].map(({v,label})=>(
-              <button key={v} onClick={()=>setGender(g=>g===v?null:v)}
-                style={{
-                  flex:1,padding:"13px",borderRadius:12,fontFamily:"inherit",fontSize:14,fontWeight:600,
-                  cursor:"pointer",transition:"all 0.15s",
-                  border:`1.5px solid ${gender===v?C.accent:C.border}`,
-                  background:gender===v?C.accent:"transparent",
-                  color:gender===v?C.bg:C.text,
-                }}>
-                {label}
-              </button>
-            ))}
-          </div>
-          {!gender&&<p style={{fontSize:11,color:C.muted,marginTop:7,marginBottom:0}}>Optional — helps tailor singer matches</p>}
-        </div>
-
-        {/* Genre */}
         <div style={{marginBottom:28}}>
           <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:12,textTransform:"uppercase"}}>Genres you love</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
@@ -322,7 +290,6 @@ Prioritize artists and songs matching their genre and language preferences. Matc
           </div>
         </div>
 
-        {/* Language */}
         <div style={{marginBottom:36}}>
           <div style={{fontSize:10,letterSpacing:5,color:C.muted,marginBottom:12,textTransform:"uppercase"}}>Languages you sing in</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
@@ -376,13 +343,16 @@ Prioritize artists and songs matching their genre and language preferences. Matc
           @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
           @keyframes glow{0%,100%{text-shadow:0 0 60px var(--gc)}50%{text-shadow:0 0 140px var(--gc),0 0 220px var(--gc)}}
         `}</style>
+
         <div style={{fontSize:10,letterSpacing:6,color:C.muted,marginBottom:8,textTransform:"uppercase"}}>
           Phase {phaseIdx+1} of {PHASES.length}
         </div>
+
         <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:"clamp(32px,7vw,60px)",
           lineHeight:1,color:phase.col,letterSpacing:3,marginBottom:10}}>{phase.label}</div>
         <p style={{color:C.muted,fontSize:14,maxWidth:340,lineHeight:1.6,marginBottom:28}}>{phase.sub}</p>
 
+        {/* Big countdown */}
         <div style={{"--gc":phase.col,fontFamily:'"Bebas Neue",sans-serif',
           fontSize:"clamp(120px,26vw,200px)",lineHeight:1,
           color:phase.col,marginBottom:20,
@@ -390,6 +360,7 @@ Prioritize artists and songs matching their genre and language preferences. Matc
           {timer}
         </div>
 
+        {/* Live pitch */}
         <div style={{marginBottom:20}}>
           <div style={{fontFamily:'"Bebas Neue",sans-serif',fontSize:48,lineHeight:1,
             color:liveHz>0?C.accent:C.dim,transition:"color 0.1s"}}>
@@ -400,6 +371,7 @@ Prioritize artists and songs matching their genre and language preferences. Matc
           </div>
         </div>
 
+        {/* Volume bar */}
         <div style={{width:"min(300px,80vw)",marginBottom:28}}>
           <div style={{height:7,background:C.dim,borderRadius:4,overflow:"hidden"}}>
             <div style={{height:"100%",borderRadius:4,
@@ -411,6 +383,7 @@ Prioritize artists and songs matching their genre and language preferences. Matc
           </div>}
         </div>
 
+        {/* Overall progress */}
         <div style={{width:"min(300px,80vw)"}}>
           <div style={{height:3,background:C.dim,borderRadius:2,overflow:"hidden"}}>
             <div style={{height:"100%",background:C.accent,borderRadius:2,
