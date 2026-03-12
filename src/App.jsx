@@ -251,12 +251,18 @@ Prioritize artists and songs matching their genre and language preferences. All 
         const errBody=await res.json().catch(()=>({}));
         throw new Error(errBody?.error?.message||`HTTP ${res.status}`);
       }
-      const d=await res.json();
-      const txt=d.choices?.[0]?.message?.content||"";
-      const clean=txt.replace(/```json\n?|\n?```/g,"").replace(/```/g,"").trim();
-      const jsonMatch=clean.match(/\{[\s\S]*\}/);
-      if(!jsonMatch)throw new Error("No JSON found in response");
-      setAiData(JSON.parse(jsonMatch[0]));
+     const d=await res.json();
+const txt=d.choices?.[0]?.message?.content||"";
+let clean=txt.replace(/```json\n?|\n?```/g,"").replace(/```/g,"").trim();
+const jsonMatch=clean.match(/\{[\s\S]*\}/);
+if(!jsonMatch)throw new Error("No JSON found in response");
+const sanitized=jsonMatch[0].replace(/[\u0000-\u001F\u007F]/g,c=>{
+  if(c==='\n')return'\\n';
+  if(c==='\r')return'\\r';
+  if(c==='\t')return'\\t';
+  return '';
+});
+setAiData(JSON.parse(sanitized));
     }catch(e){
       console.error("AI error:",e);
       setAiErr(`AI error: ${e.message}`);
