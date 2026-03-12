@@ -7,10 +7,10 @@ const GENRES = ["Pop","Rock","R&B","Hip-Hop","Jazz","Classical","Electronic","Co
 const LANGUAGES = ["English","Hindi","Spanish","French","Korean","Arabic","Portuguese","Italian","Japanese","Swahili"];
 
 const PHASES = [
-  { id:"low",   dur:7,  label:"SA",           sub:"Find your lowest comfortable Sa and hold it",       col:"#60a5fa", note:"𝄢  Sa" },
-  { id:"scale", dur:9,  label:"RE · GA · MA · PA", sub:"Slowly climb up — Re... Ga... Ma... Pa...",    col:"#a78bfa", note:"↑"   },
-  { id:"high",  dur:7,  label:"DHA · NI · SA", sub:"Keep going up to your highest comfortable Sa",     col:"#f87171", note:"𝄞  Sa" },
-  { id:"free",  dur:7,  label:"SING FREELY",   sub:"Any melody at your most natural, relaxed pitch",   col:"#c8ff47", note:"♪"   },
+  { id:"low",   dur:5,  label:"SA",           sub:"Find your lowest comfortable Sa and hold it",       col:"#60a5fa", note:"𝄢  Sa" },
+  { id:"scale", dur:5,  label:"RE · GA · MA · PA", sub:"Slowly climb up — Re... Ga... Ma... Pa...",    col:"#a78bfa", note:"↑"   },
+  { id:"high",  dur:5,  label:"DHA · NI · SA", sub:"Keep going up to your highest comfortable Sa",     col:"#f87171", note:"𝄞  Sa" },
+  { id:"free",  dur:5,  label:"SING FREELY",   sub:"Any melody at your most natural, relaxed pitch",   col:"#c8ff47", note:"♪"   },
 ];
 
 function detectPitchYIN(buf, sr) {
